@@ -41,5 +41,6 @@ endif(CMAKE_CONFIGURATION_TYPES)
 add_subdirectory(src)
 add_subdirectory(polycrystal)
 add_subdirectory(bubble)
+add_subdirectory(polydispersebubble)
 add_subdirectory(cermet)
 
