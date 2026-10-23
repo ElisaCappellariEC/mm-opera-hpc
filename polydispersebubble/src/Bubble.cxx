@@ -146,11 +146,11 @@ struct BubbleInfoRecord {
  * \param end End time for post-processing
  */
 template <typename Problem>
-void post_process(mfem_mgis::Context& ctx,
+bool post_process(mfem_mgis::Context& ctx,
                   Problem& p,
                   double start,
                   double end) {
-  p.executePostProcessings(ctx, start, end);
+  return p.executePostProcessings(ctx, start, end);
 }
 
 /**
@@ -202,6 +202,15 @@ struct TestParameters : PhysicalParameters {
   int verbosity_level = 0;  ///< Output verbosity level
   mfem_mgis::real scale_factor_vp =
       0.9;  ///< Scale factor for principal stress threshold
+  /*!
+   * Preconditioner of the linear solver (HyprePCG). The original code used
+   * HypreDiagScale, which needs more than 1000 iterations on the default
+   * mesh (mesh/single_sphere.msh): since MFEM 4.10 / mfem-mgis develop, the
+   * solver then reports a failure ("the non linear solver did not converge").
+   */
+  const char* linear_solver_preconditioner = "HypreBoomerAMG";
+  //! Maximum number of iterations of the linear solver (hypre default: 1000)
+  int linear_solver_maximum_iterations = 5000;
 };
 
 /**
@@ -244,6 +253,13 @@ void fill_parameters(mfem::OptionsParser& args, TestParameters& p) {
                  "Pressure multiplier: bubble i gets pref * p_i, p_i being "
                  "the 6th column of the bubble file (1 if absent), "
                  "default = 1");
+  args.AddOption(&p.linear_solver_preconditioner, "-pc", "--preconditioner",
+                 "Preconditioner of the linear solver: HypreBoomerAMG "
+                 "(default), HypreDiagScale (original), HypreILU, ...");
+  args.AddOption(&p.linear_solver_maximum_iterations, "-li",
+                 "--linear-solver-iterations",
+                 "Maximum number of iterations of the linear solver, "
+                 "default = 5000");
 
   args.Parse();
 
@@ -503,12 +519,17 @@ int main(int argc, char** argv) {
   mfem_mgis::Parameters solverParameters;
   solverParameters.insert(mfem_mgis::may_throw,
                           mfem_mgis::Parameters{{"VerbosityLevel", verbosity}});
-  // Use diagonal scaling preconditioner
-  auto preconditioner = mfem_mgis::Parameters{{"Name", "HypreDiagScale"}};
+  // Preconditioner chosen with -pc (the original code always used
+  // HypreDiagScale) and maximum number of iterations set with -li (the
+  // original code kept the hypre default, 1000)
+  auto preconditioner =
+      mfem_mgis::Parameters{{"Name", p.linear_solver_preconditioner}};
   solverParameters.insert(
       mfem_mgis::may_throw,
-      mfem_mgis::Parameters{{"Preconditioner", preconditioner},
-                            {"Tolerance", 1e-10}});
+      mfem_mgis::Parameters{
+          {"Preconditioner", preconditioner},
+          {"Tolerance", 1e-10},
+          {"MaximumNumberOfIterations", p.linear_solver_maximum_iterations}});
 
   // Set up conjugate gradient solver
   problem.setLinearSolver(ctx, "HyprePCG", solverParameters) | or_die;
@@ -788,7 +809,8 @@ int main(int argc, char** argv) {
     // average over the RVE (negative = compression, because the macroscopic
     // strain is imposed to zero)
     mfem_mgis::computeHydrostaticPressure(
-        ctx, hyp, m, mfem_mgis::Material::END_OF_TIME_STEP);
+        ctx, hyp, m, mfem_mgis::Material::END_OF_TIME_STEP) |
+        or_die;
     calculateAverageHydrostaticStress<true>(
         mfem_mgis::may_abort, ctx, outfile_sighydr,
         problem.getImplementation<true>(), hyp);
@@ -798,12 +820,15 @@ int main(int argc, char** argv) {
   if (post_processing) {
     CatchTimeSection(ctx, "common::post_processing_step");
 
-    // Execute standard post-processing (Paraview export of the stress)
-    post_process(ctx, problem, 0, 1);
+    // Execute standard post-processing (Paraview export of the stress).
+    // NB: the return values below are checked with `or_die` so that a
+    // failure prints its error message (the original code ignored them, and
+    // a failed L2 projection then crashed with a segmentation fault).
+    post_process(ctx, problem, 0, 1) | or_die;
 
     // First principal stress at the integration points
     auto end = mfem_mgis::Material::END_OF_TIME_STEP;
-    mfem_mgis::computeFirstEigenStress(ctx, eig, m, end);
+    mfem_mgis::computeFirstEigenStress(ctx, eig, m, end) | or_die;
 
     // L2 projection of the first eigenstress at the nodes
     // for better visualization
@@ -817,10 +842,12 @@ int main(int argc, char** argv) {
                           mfem_mgis::Parameters{{"Name", "HypreILU"}}}}) |
         or_die;
 
+    // empty result (e.g. linear solver not converged) -> error message
     auto projection =
-        mfem_mgis::computeL2Projection<true>(ctx, linear_solver, {eig});
+        mfem_mgis::computeL2Projection<true>(ctx, linear_solver, {eig}) |
+        or_die;
 
-    auto eigenstress_gf_ptr = projection->result.get();
+    auto eigenstress_gf_ptr = projection.result.get();
 
     mfem::ParaViewDataCollection exporter("Eigenstress-pp");
     exporter.SetDataFormat(mfem::VTKFormat::BINARY);

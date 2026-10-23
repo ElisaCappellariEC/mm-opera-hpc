@@ -30,7 +30,8 @@ Comando tipo per una popolazione:
 mpirun -n <N> ./test-polybubble -m mesh.msh -f bubbles.txt -dl 0.2 -sf 0 -p 0 -n mio_caso
 ```
 
-Con `-dl 0 -sf 0.9` (i default) il calcolo è quello originale (cambia solo il formato del CSV).
+Con `-dl 0 -sf 0.9` (i default) il calcolo è quello originale (cambia solo il formato del CSV). Il solutore lineare
+usa ora BoomerAMG invece del precondizionatore diagonale (§3): stessi risultati, molte meno iterazioni.
 
 ---
 
@@ -102,6 +103,8 @@ Tutte le modifiche sono commentate nel codice (commenti in inglese, come il rest
 | `src/Bubble.cxx` – riduzione | `MPI_Gather` di `[σ, x, y, z] × n_bolle` sul rank 0 | combina i massimi locali (poche decine di KB) |
 | `src/Bubble.cxx` – output | CSV con raggio e pressione, `nan` se nessun punto, avviso se ci sono bolle senza valore; intestazioni senza virgola finale; dettaglio per bolla solo con `-v 1` | post-processing diretto (pandas/numpy), log leggibile con 1867 bolle |
 | `src/Bubble.cxx` – post-processing | CSV e `sig_hydro.txt` sempre scritti, `-p` controlla solo ParaView | sulla mesh grande gli export ParaView pesano decine di GB e richiedono una proiezione L2 in più |
+| `src/Bubble.cxx` – solutore lineare | precondizionatore `-pc` (default `HypreBoomerAMG`, prima `HypreDiagScale` fisso) e massimo di iterazioni `-li` (default 5000, prima 1000 di hypre) | sulla mesh di default il PCG diagonale richiede 1355 iterazioni: con MFEM 4.10 + mfem-mgis develop il superamento delle 1000 è un errore (`solve: the non linear solver did not converge`). BoomerAMG: 18 iterazioni, risultati identici (10 cifre) |
+| `src/Bubble.cxx` – controlli con `-p 1` | `\| or_die` su export ParaView, σ_I, proiezione L2 e tensione idrostatica | l'originale ignorava gli errori: se la proiezione L2 falliva, il programma andava in segfault senza messaggio |
 | `tools/PartitionMesh.cxx` (nuovo) | programma `partition-mesh` | vedi §5 |
 | `CMakeLists.txt` | target rinominati (`test-polybubble`, `lib-elasticity-poly`, test `PolyBubbleTest`); sorgenti limitati a `src/`; target `partition-mesh` presente ma commentato | nomi unici nel progetto CMake; il glob ricorsivo avrebbe incluso il secondo `main` di `tools/` |
 | `scripts/fgr_population.py` (nuovo) | FGR(σ_R) dal CSV | formula FGR del README principale |
@@ -125,7 +128,8 @@ Checklist:
 - condizione al contorno: `pref * b.pressure`; la lambda cattura `b` per riferimento a un vettore che non viene più ridimensionato;
 - ricerca: `rs` usato in **tutti e tre** i filtri (fetta in x, test y/z, distanza);
 - MPI: la ricerca usa solo punti locali, la riduzione avviene **dopo** il ciclo, solo il rank 0 scrive;
-- con `-dl 0 -sf 0.9` i valori devono essere identici all'originale.
+- con `-dl 0 -sf 0.9` i valori devono essere identici all'originale (all'ultima cifra con il default BoomerAMG,
+  esattamente con `-pc HypreDiagScale`).
 
 Per togliere tutto: cancellare `polydispersebubble/` e la riga `add_subdirectory(polydispersebubble)` in `mm-opera-hpc/CMakeLists.txt`.
 
@@ -221,12 +225,19 @@ printf '2 0 0 0 0.400 2.0\n' > p2.txt   # p = 2 → sigma_I_max e sig_hydro esat
 mpirun -n 4 ./test-polybubble -m mesh/mesh_sphere.msh -f p1.txt -p 0 && diff ref.csv bubbles_and_stresses_selected.txt
 mpirun -n 4 ./test-polybubble -m mesh/mesh_sphere.msh -f p2.txt -p 0 && cat bubbles_and_stresses_selected.txt
 # verifica analitica (mesh fine di default, serve -p 1):
-mpirun -n 6 ./test-polybubble && python3 mmm_vs_analytical.py      # → "Check PASS."
+mpirun -n 6 ./test-polybubble && python3 mmm_vs_analytical.py      # → "Check PASS." (~20 s, provato qui)
+# sigma_I_max = 0.507159400619, sig_hydro Average = -0.00043534 (stessi valori con -pc HypreDiagScale -li 20000)
 # partition-mesh (solo se abilitato in CMakeLists.txt): stessi risultati con -pm 1
 mpirun -n 4 ./partition-mesh -m mesh/mesh_sphere.msh -o ci_par.
 mpirun -n 4 ./test-polybubble -pm 1 -m ci_par. -f mesh/single_bubble_ci.txt -p 0 && cat bubbles_and_stresses_selected.txt
 # → stessi valori di ref.csv (a meno di differenze all'ultima cifra) e stesso sig_hydro.txt
 ```
+
+**Se compare `solve: the non linear solver did not converge`** (poi `signal 6 (Aborted)` su tutti i processi):
+il solutore lineare ha raggiunto il massimo di iterazioni. Era il caso della mesh di default con il precondizionatore
+originale (`HypreDiagScale`: 1355 iterazioni > 1000). Rilancia con `-v 1` per vedere `PCG Iterations` e, se serve,
+aumenta `-li` o cambia `-pc`. Sulle mesh grandi tieni `HypreBoomerAMG`: con il precondizionatore diagonale le
+iterazioni crescono con la dimensione della mesh.
 
 ### 3. Test polidisperso piccolo (minuti, anche su un PC)
 
@@ -295,6 +306,6 @@ python3 scripts/fgr_population.py bubbles_and_stresses_selected.txt --shift-hydr
   attraversa l'involucro periodico, la parte oltre l'involucro (che nella mesh sta sul lato opposto, traslata di 30 µm)
   non viene vista. L'involucro di Merope non taglia le bolle, quindi la parete è sempre inclusa; l'effetto è limitato.
 - `Bubble::broken` non viene mai messo a `true` (residuo di una versione iterativa): la pressione è sempre applicata.
-- Nessuna verifica di compilazione di `test-polybubble` sul PC dove è stato scritto (mfem-mgis 1.0.3, troppo vecchio,
-  vedi §6.1): sono stati compilati e provati solo `BubbleDescription.cxx` (lettura file) e `partition-mesh`.
-  La configurazione CMake con la nuova cartella è stata verificata. Il passo 2 del piano serve a verificare il resto.
+- `test-polybubble` è stato compilato e provato su PC-EC (mfem-mgis develop, MFEM 4.10, OpenMPI 5): regressione CI
+  e verifica analitica (`Check PASS.`) del passo 2. Il caso polidisperso (passo 3) e `-pm 1` non sono ancora stati provati
+  con questa versione.

@@ -59,6 +59,8 @@ Usage: ./test-polybubble [options] ...
 | `-dm <double>, --dmin <double>`           | double | `0.950`                  | Distance to evaluate bubble rupture.        |
 | `-dl <double>, --delta <double>`          | double | `0`                      | If > 0, search radius of bubble i = radius_i + delta (instead of dmin). |
 | `-pr <double>, --pref <double>`           | double | `1`                      | Pressure multiplier: bubble i gets pref × p_i (p_i = 6th column of the bubble file, 1 if absent). |
+| `-pc <string>, --preconditioner <string>` | string | `HypreBoomerAMG`         | Preconditioner of the linear solver (HyprePCG). `HypreDiagScale` = original choice. |
+| `-li <int>, --linear-solver-iterations <int>` | int | `5000`                 | Maximum number of iterations of the linear solver. |
 
 The command to execute the test-case is
 
