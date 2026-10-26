@@ -3,6 +3,10 @@
  * \brief
  * \author Thomas Helfer
  * \date   29/09/2024
+ * 
+ * Code modified by
+ * \author E. Cappellari (POLIMI-CEA, 2026)
+ * with respect to the original folder bubble/
  */
 
 #ifndef LIB_OPERA_HPC_UTILITIES_HXX
@@ -82,8 +86,7 @@ namespace opera_hpc {
   /*!
    * \brief Same as getPointsandStressAboveStressThreshold, but without any
    * MPI communication: each process only returns the integration points it
-   * owns. Used for the per-bubble search, whose results are then reduced
-   * over the processes (much less memory than gathering all the points).
+   * owns.
    * \param[in] m The material object to query.
    * \param[in] v The stress threshold value.
    * \return The local points whose first principal stress exceeds v.

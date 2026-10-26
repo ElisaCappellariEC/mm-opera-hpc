@@ -3,6 +3,10 @@
  * \brief
  * \author Thomas Helfer
  * \date   29/09/2024
+ * 
+ * Code modified by
+ * \author E. Cappellari (POLIMI-CEA, 2026)
+ * with respect to the original folder bubble/
  */
 
 #ifndef LIB_OPERA_HPC_BUBBLEDESCRIPTION_HXX
@@ -34,9 +38,8 @@ namespace opera_hpc {
      * \brief internal pressure of the bubble.
      *
      * Read from the optional 6th column of the bubble file. Files with only
-     * 5 columns keep the default value 1, so the old behaviour (same
-     * pressure for every bubble, set by `--pref`) is unchanged. The value is
-     * multiplied by `--pref` when the boundary condition is applied.
+     * 5 columns keep the default value 1. The value is multiplied by `--pref` 
+     * when the boundary condition is applied.
      */
     mfem_mgis::real pressure = 1;
   };

@@ -1,8 +1,6 @@
 project(OperaHPCPolydisperseBubble)
 
-# Copy of the `bubble` case for polydisperse bubbles with one pressure per
-# bubble (see POLYDISPERSE.md). Target and test names differ from `bubble`
-# because CMake target names must be unique in the whole project.
+# Copy of the `bubble` case for polydisperse bubbles with one pressure per bubble.
 
 file(COPY verification/mmm_vs_analytical.py DESTINATION ${PROJECT_BINARY_DIR})
 
@@ -34,10 +32,7 @@ target_link_libraries(test-polybubble
 target_include_directories(test-polybubble
    PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
-# Tool to split a big Gmsh 2.2 mesh into MFEM parallel mesh files, to be read
-# with `test-polybubble -pm 1` (see POLYDISPERSE.md). Only needed when the
-# full mesh does not fit in memory on every process: uncomment the two lines
-# below and add partition-mesh to the install line.
+# [TBC] Tool to split a big Gmsh 2.2 mesh into MFEM parallel mesh files.
 # add_executable(partition-mesh tools/PartitionMesh.cxx)
 # target_link_libraries(partition-mesh PUBLIC mfem-mgis::MFEMMGIS)
 

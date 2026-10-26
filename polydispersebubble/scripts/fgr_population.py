@@ -20,6 +20,8 @@ p_i - |Average| instead of p_i. It is exact only in this sense; with
 different pressures per bubble it is an approximation.
 
 Output: <prefix>.csv (sigma_R, FGR) and <prefix>.png.
+
+author E. Cappellari (POLIMI-CEA, 2026)
 """
 
 import argparse

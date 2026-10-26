@@ -6,6 +6,10 @@
  * This program simulates the mechanical behavior of a material containing
  * bubbles under pressure. It identifies which bubbles are likely to break based
  * on the principal stress field around them.
+ * 
+ * Code modified by
+ * \author E. Cappellari (POLIMI-CEA, 2026)
+ * with respect to the original folder bubble/
  */
 
 #include <cmath>
@@ -101,9 +105,7 @@ namespace opera_hpc {
 }  // end of namespace opera_hpc
 
 /*!
- * \brief Value used for "no stress found near this bubble" (no integration
- * point in its search sphere, or none above the threshold). Any real stress
- * is larger, which makes the max-reduction over MPI processes simple.
+ * \brief Value used for "no stress found near this bubble".
  */
 constexpr mfem_mgis::real no_stress_value =
     -std::numeric_limits<mfem_mgis::real>::max();
@@ -162,22 +164,17 @@ bool post_process(mfem_mgis::Context& ctx,
  */
 struct PhysicalParameters {
   /*!
-   * Pressure multiplier: the pressure imposed in bubble i is
-   * bubble_pressure * p_i, where p_i is read from the 6th column of the
-   * bubble file (p_i = 1 when the file only has 5 columns, which gives back
-   * the original "same pressure everywhere" behaviour).
+   * Pressure multiplier: the pressure imposed in bubble i is bubble_pressure * p_i,  
+   * where p_i is read from the 6th column of the bubble file.
    */
   mfem_mgis::real bubble_pressure = 1.0;
   mfem_mgis::real d_min =
       0.950;  ///< Distance threshold for associating stress with bubbles
   /*!
-   * Thickness of the shell around each bubble in which the maximum first
-   * principal stress is searched (same unit as the mesh, µm).
-   * - delta > 0: the search radius of bubble i is radius_i + delta. This is
-   *   needed for polydisperse populations: a fixed radius cannot be larger
-   *   than the big bubbles and smaller than the gap around the small ones.
-   * - delta <= 0 (default): the fixed radius d_min is used for every bubble
-   *   (original behaviour, designed for a single bubble size).
+   * Thickness of the shell (µm) around each bubble in which the maximum first
+   * principal stress is searched.
+   * - delta > 0: the search radius of bubble i is radius_i + delta.
+   * - delta <= 0 (default): the fixed radius d_min is used for every bubble.
    */
   mfem_mgis::real delta = 0;
 };
@@ -202,11 +199,9 @@ struct TestParameters : PhysicalParameters {
   int verbosity_level = 0;  ///< Output verbosity level
   mfem_mgis::real scale_factor_vp =
       0.9;  ///< Scale factor for principal stress threshold
-  /*!
+  /*! [TBC]
    * Preconditioner of the linear solver (HyprePCG). The original code used
-   * HypreDiagScale, which needs more than 1000 iterations on the default
-   * mesh (mesh/single_sphere.msh): since MFEM 4.10 / mfem-mgis develop, the
-   * solver then reports a failure ("the non linear solver did not converge").
+   * HypreDiagScale.
    */
   const char* linear_solver_preconditioner = "HypreBoomerAMG";
   //! Maximum number of iterations of the linear solver (hypre default: 1000)
@@ -231,15 +226,13 @@ void fill_parameters(mfem::OptionsParser& args, TestParameters& p) {
   args.AddOption(&p.refinement, "-r", "--refinement",
                  "refinement level of the mesh, default = 0");
   args.AddOption(&p.post_processing, "-p", "--post-processing",
-                 "export the stress fields for ParaView (1) or not (0). The "
-                 "bubble CSV and sig_hydro.txt are always written.");
+                 "export the stress fields for ParaView (1) or not (0)");
   args.AddOption(&p.verbosity_level, "-v", "--verbosity-level",
                  "choose the verbosity level");
   args.AddOption(&p.scale_factor_vp, "-sf", "--scale-factor-vp",
                  "Scaling factor for the principal stress: only the points "
-                 "above sf * (maximum first principal stress) are used in "
-                 "the per-bubble search. Use a value <= 0 to use all the "
-                 "points, so that every bubble gets a value.");
+                 "above sf * (maximum first principal stress) are used." 
+                 "Use a value <= 0 to use all the points.");
   args.AddOption(&p.testcase_name, "-n", "--name-case",
                  "Name of the testcase.");
   args.AddOption(
@@ -255,7 +248,7 @@ void fill_parameters(mfem::OptionsParser& args, TestParameters& p) {
                  "default = 1");
   args.AddOption(&p.linear_solver_preconditioner, "-pc", "--preconditioner",
                  "Preconditioner of the linear solver: HypreBoomerAMG "
-                 "(default), HypreDiagScale (original), HypreILU, ...");
+                 "(default), HypreDiagScale (original)");
   args.AddOption(&p.linear_solver_maximum_iterations, "-li",
                  "--linear-solver-iterations",
                  "Maximum number of iterations of the linear solver, "
@@ -290,8 +283,6 @@ void fill_parameters(mfem::OptionsParser& args, TestParameters& p) {
 void write_message(std::ofstream& file_to_write,
                    const auto& first,
                    const auto&... args) {
-  // "a,b,c" without a trailing comma, so that the header has as many
-  // columns as the data lines (the original version wrote "a,b,c,")
   file_to_write << first;
   ((file_to_write << "," << args), ...);
   file_to_write << std::endl;
@@ -493,9 +484,7 @@ int main(int argc, char** argv) {
       [e](const mfem_mgis::real) { return e; });
   // Apply pressure boundary conditions on each bubble: one boundary
   // condition per bubble, on the mesh boundary whose tag is the bubble
-  // identifier (the "Physical Surface" of the bubble in the .geo file).
-  // NB: the lambda captures a reference to the bubble, which is safe because
-  // the vector `bubbles` is not resized after this point.
+  // identifier ("Physical Surface" in the .geo file).
   for (const auto& b : bubbles) {
     problem.addBoundaryCondition(
         ctx, mfem_mgis::make_unique<
@@ -505,7 +494,7 @@ int main(int argc, char** argv) {
                  [&b, pref = p.bubble_pressure](const mfem_mgis::real) {
                    // If bubble is broken, pressure = 0; otherwise pressure =
                    // pref * (pressure of this bubble, read from the file).
-                   // NB: `broken` is never set to true in this program, it
+                   // [TBC] `broken` is never set to true in this program, it
                    // is a leftover of an iterative version.
                    return b.broken ? 0 : pref * b.pressure;
                  }) |
@@ -519,9 +508,7 @@ int main(int argc, char** argv) {
   mfem_mgis::Parameters solverParameters;
   solverParameters.insert(mfem_mgis::may_throw,
                           mfem_mgis::Parameters{{"VerbosityLevel", verbosity}});
-  // Preconditioner chosen with -pc (the original code always used
-  // HypreDiagScale) and maximum number of iterations set with -li (the
-  // original code kept the hypre default, 1000)
+  // Preconditioner chosen with -pc
   auto preconditioner =
       mfem_mgis::Parameters{{"Name", p.linear_solver_preconditioner}};
   solverParameters.insert(
@@ -551,6 +538,7 @@ int main(int argc, char** argv) {
   // imposing only the two elastic moduli. Please note that since
   // we are scaling everything to µm, we consider the Elastic
   // modulus in N/µm² to have a consistent displacement field.
+  // [TBC]
   for (auto& s : {&m.s0, &m.s1}) {
     mgis::behaviour::setMaterialProperty(ctx, *s, "YoungModulus",
                                          150e-3) |
@@ -589,20 +577,15 @@ int main(int argc, char** argv) {
   std::vector<BubbleInfoRecord> bubbles_information;
 
   // Define stress threshold
-  // - sf > 0 (original behaviour): only the integration points whose first
-  //   principal stress is above sf * (global maximum) are kept, so only the
-  //   bubbles close to the most loaded points get a value.
-  // - sf <= 0: every integration point is kept, so every bubble gets its own
-  //   maximum (needed for population studies, e.g. the FGR of the README).
+  // - sf > 0: only the integration points whose first principal stress is 
+  //   above sf * (global maximum) are kept.
+  // - sf <= 0: every integration point is kept.
   const auto max_vp_scaled = (p.scale_factor_vp > 0)
                                  ? p.scale_factor_vp * r.value
                                  : no_stress_value;
 
   // Get the locations where the stress exceeds the threshold. Only the
-  // points owned by this MPI process are returned (no communication): the
-  // per-bubble maxima computed below are combined over all the processes
-  // afterwards. This gives the same result as gathering all the points on
-  // every process, but with much less memory on big meshes.
+  // points owned by this MPI process are returned, and they are combined afterwards.
   auto all_locations_and_stresses_above_threshold =
       opera_hpc::getLocalPointsAndStressAboveStressThreshold(
           problem.getMaterial(ctx, 1, 0) | or_die, max_vp_scaled);
@@ -614,7 +597,7 @@ int main(int argc, char** argv) {
 
   {
     CatchTimeSection(ctx, "BubbleLoop");
-    // copied here so that the lambda below does not capture `p`
+
     const auto delta = p.delta;
 
     // Sort all  points by their X-coordinate for efficient spatial
@@ -637,17 +620,11 @@ int main(int argc, char** argv) {
     // NB it can run OMP on CPU parallelization if hypre was compiled with this
     // support otherwise it degenerates to a simple for. it can do something
     // exotic with gpu but idk.
-    // NB: each MPI process only sees its own points here, so the result for
-    // a bubble is the maximum over the part of its neighbourhood owned by
-    // this process. The global maximum is computed after this loop.
     mfem::forall(num_bubbles, [=] MFEM_HOST_DEVICE(int i) {
       // 1. Get current bubble to process
       const auto& b = bubbles_data[i];
 
-      // Search radius of this bubble (distance from its center):
-      // - delta > 0: radius + delta, i.e. a shell of thickness delta around
-      //   the bubble surface, which adapts to the size of each bubble;
-      // - otherwise: the fixed distance dmin (original behaviour).
+      // Search radius of this bubble (distance from its center).
       const auto rs = (delta > 0) ? b.radius + delta : dmin;
 
       // Initialize tracking variables for maximum stress point near this
@@ -741,7 +718,7 @@ int main(int argc, char** argv) {
       local_values[values_per_bubble * i + 2] = bi.location[1];
       local_values[values_per_bubble * i + 3] = bi.location[2];
     }
-    // only process 0 needs the receive buffer
+
     auto all_values = std::vector<mfem_mgis::real>(
         rank == 0 ? values_per_bubble * nb * nprocs : 0);
     const auto count = static_cast<int>(values_per_bubble * nb);
@@ -764,24 +741,18 @@ int main(int argc, char** argv) {
     }
   }
 
-  // Bubble results (CSV) and mean hydrostatic stress (sig_hydro.txt): always
-  // computed and written, since they are cheap. In the original version they
-  // were only written with `-p 1`, which also exports the full stress fields
-  // for ParaView (tens of GB for big meshes).
   {
     CatchTimeSection(ctx, "common::bubble_results");
 
     if (mfem_mgis::isMPIMainProcessForDefaultCommunicator()) {
-      // Bubbles with no integration point in their search sphere (or none
-      // above the threshold): report them, they are written as "nan".
+      // Bubbles with no integration point in their search sphere: "nan".
       auto nb_without_value = std::size_t{0};
       for (const auto& el : bubbles_information) {
         if (el.stress_value == no_stress_value) {
           ++nb_without_value;
         }
       }
-      if (nb_without_value != 0) {
-        // NB: Message adds a space between its arguments
+      if (nb_without_value != 0) { 
         Message("WARNING:", nb_without_value, "bubble(s) out of",
                 bubbles_information.size(),
                 "have no value (no integration point found). Use -sf 0 "
@@ -806,8 +777,7 @@ int main(int argc, char** argv) {
       write_message(outfile_sighydr, "Volume", "Integral", "Average");
 
     // Hydrostatic stress tr(sigma)/3 at the integration points, then its
-    // average over the RVE (negative = compression, because the macroscopic
-    // strain is imposed to zero)
+    // average over the RVE  
     mfem_mgis::computeHydrostaticPressure(
         ctx, hyp, m, mfem_mgis::Material::END_OF_TIME_STEP) |
         or_die;
@@ -820,10 +790,7 @@ int main(int argc, char** argv) {
   if (post_processing) {
     CatchTimeSection(ctx, "common::post_processing_step");
 
-    // Execute standard post-processing (Paraview export of the stress).
-    // NB: the return values below are checked with `or_die` so that a
-    // failure prints its error message (the original code ignored them, and
-    // a failed L2 projection then crashed with a segmentation fault).
+    // Execute standard post-processing.
     post_process(ctx, problem, 0, 1) | or_die;
 
     // First principal stress at the integration points
@@ -842,7 +809,6 @@ int main(int argc, char** argv) {
                           mfem_mgis::Parameters{{"Name", "HypreILU"}}}}) |
         or_die;
 
-    // empty result (e.g. linear solver not converged) -> error message
     auto projection =
         mfem_mgis::computeL2Projection<true>(ctx, linear_solver, {eig}) |
         or_die;

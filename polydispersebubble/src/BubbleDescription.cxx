@@ -4,6 +4,10 @@
  * manipulating bubble data
  * \author Thomas Helfer
  * \date   29/09/2024
+ * 
+ * Code modified by
+ * \author E. Cappellari (POLIMI-CEA, 2026)
+ * with respect to the original folder bubble/
  */
 
 #include <cmath>
@@ -22,12 +26,7 @@ namespace opera_hpc {
    * File format: Each line contains 5 or 6 space-separated values:
    * boundary_id center_x center_y center_z radius [pressure]
    *
-   * - boundary_id must be the "Physical Surface" tag of the bubble in the
-   *   mesh: it is the boundary on which the pressure is imposed.
-   * - pressure is optional. When it is missing the bubble gets pressure 1,
-   *   which reproduces the original 5-column format. Its unit is the one you
-   *   want the stresses in (the problem is linear and E only scales the
-   *   displacement), e.g. MPa.
+   * - pressure is optional.
    *
    * Lines starting with '#' are treated as comments and ignored.
    * Empty lines are also ignored.
@@ -131,8 +130,7 @@ namespace opera_hpc {
       convert(bubble.center[1], tokens[2]);            // Y coordinate of center
       convert(bubble.center[2], tokens[3]);            // Z coordinate of center
       convert(bubble.radius, tokens[4]);               // Bubble radius
-      // Optional 6th column: internal pressure of this bubble. Otherwise
-      // the default value (1) set in BubbleDescription is kept.
+      // Optional 6th column: internal pressure of this bubble.
       if (tokens.size() == 6) {
         convert(bubble.pressure, tokens[5]);
       }

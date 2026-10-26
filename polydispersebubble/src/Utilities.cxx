@@ -6,6 +6,10 @@
  *
  * This file provides utilities to extract and analyze stress fields from
  * finite element simulations.
+ * 
+ * Code modified by
+ * \author E. Cappellari (POLIMI-CEA, 2026)
+ * with respect to the original folder bubble/
  */
 
 #include <TFEL/Math/stensor.hxx>
@@ -521,7 +525,7 @@ namespace opera_hpc {
 
   /**
    * \brief Same as getPointsandStressAboveStressThreshold, but each MPI
-   * process only gets the points it owns (no communication).
+   * process only gets the points it owns.
    *
    * \param m Material containing stress field data
    * \param v Stress threshold value
