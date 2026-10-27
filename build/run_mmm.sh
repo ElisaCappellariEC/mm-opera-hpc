@@ -1,16 +1,10 @@
-
 #!/bin/bash
 # author: E.Cappellari, POLIMI-CEA 2026
 
 set -o pipefail
 
-DIRECTORYMSH="./../../Merope/mmm_files/test_rve_side10"
-FOLDER="test_rve_side10"
-
-# # Copy input directory only if it does not already exist
-# if [[ ! -d "$FOLDER" ]]; then
-#     cp -r "$DIRECTORYMSH" . || exit 1
-# fi
+DIRECTORYMSH="./../../Merope/mmm_files/test_rve_side10_mesh0.3"
+FOLDER="test_rve_side10_mesh0.3"
 
 OUTPUTS=(
     "bubbles_and_stresses_selected.txt"
@@ -18,6 +12,33 @@ OUTPUTS=(
     "TestCaseBubble"
     "Eigenstress-pp"
 )
+
+# True if the case folder $1 has all the OUTPUTS (already solved)
+solved() {
+    local output
+    for output in "${OUTPUTS[@]}"; do
+        [[ -e "$1/$output" ]] || return 1
+    done
+}
+
+# Copy the inputs of DIRECTORYMSH into FOLDER, also when FOLDER is already there:
+#  - files and folders missing in FOLDER are added (e.g. the meshes made after the first copy);
+#  - in a case not solved yet, a file newer in DIRECTORYMSH replaces the old one (e.g. a mesh made again);
+#  - a case already solved (all OUTPUTS there) is left as it is, mesh included.
+if [[ ! -d "$DIRECTORYMSH" ]]; then
+    echo "ERROR: input folder not found: $DIRECTORYMSH"
+    exit 1
+fi
+while IFS= read -r -d '' src; do
+    dest="$FOLDER${src#"$DIRECTORYMSH"}"
+    if solved "$dest"; then
+        echo "Kept as it is (already solved): $dest"
+        continue
+    fi
+    mkdir -p "$dest" || exit 1
+    # only the files of this folder: its subfolders come in their own turn of the loop
+    find "$src" -maxdepth 1 -type f -exec cp -u -t "$dest/" {} + || exit 1
+done < <(find "$DIRECTORYMSH" -type d -print0)
 
 # Collect all meshes before starting the loop
 mapfile -t MESHES < <(
@@ -67,11 +88,13 @@ for file in "${MESHES[@]}"; do
 
     echo "Starting mpirun..."
 
-    # Activate refinement only for folders containing "_refinement"
+    # Uniform refinement in MMM only for folders ending in "_refinement<k>": k levels (-r k), 1 when k is missing.
+    # Each level halves the element size of the mesh read from the folder (plot_bubbles.py reads k the same way).
     EXTRA_ARGS=()
-    if [[ "$DIR" == *"_refinement"* ]]; then
-        EXTRA_ARGS=(-r 0)
-        echo "Refinement enabled for $DIR"
+    if [[ "$(basename "$DIR")" =~ _refinement([0-9]*)$ ]]; then
+        LEVELS="${BASH_REMATCH[1]:-1}"
+        EXTRA_ARGS=(-r "$LEVELS")
+        echo "Refinement enabled for $DIR: -r $LEVELS"
     fi
 
     if mpirun -n 4 ./test-polybubble \
