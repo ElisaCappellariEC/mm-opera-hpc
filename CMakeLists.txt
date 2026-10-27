@@ -41,6 +41,9 @@ endif(CMAKE_CONFIGURATION_TYPES)
 add_subdirectory(src)
 add_subdirectory(polycrystal)
 add_subdirectory(bubble)
+#  Code modified by
+#  \author E. Cappellari (POLIMI-CEA, 2026)
 add_subdirectory(polydispersebubble)
+#
 add_subdirectory(cermet)
 

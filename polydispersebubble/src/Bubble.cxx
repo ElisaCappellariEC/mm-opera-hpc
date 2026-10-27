@@ -105,7 +105,7 @@ namespace opera_hpc {
 }  // end of namespace opera_hpc
 
 /*!
- * \brief Value used for "no stress found near this bubble".
+ * \brief Value used for no stress found near this bubble.
  */
 constexpr mfem_mgis::real no_stress_value =
     -std::numeric_limits<mfem_mgis::real>::max();
@@ -199,12 +199,12 @@ struct TestParameters : PhysicalParameters {
   int verbosity_level = 0;  ///< Output verbosity level
   mfem_mgis::real scale_factor_vp =
       0.9;  ///< Scale factor for principal stress threshold
-  /*! [TBC]
+  /*
    * Preconditioner of the linear solver (HyprePCG). The original code used
    * HypreDiagScale.
    */
   const char* linear_solver_preconditioner = "HypreBoomerAMG";
-  //! Maximum number of iterations of the linear solver (hypre default: 1000)
+  // Maximum number of iterations of the linear solver (hypre default: 1000)
   int linear_solver_maximum_iterations = 5000;
 };
 
@@ -494,8 +494,7 @@ int main(int argc, char** argv) {
                  [&b, pref = p.bubble_pressure](const mfem_mgis::real) {
                    // If bubble is broken, pressure = 0; otherwise pressure =
                    // pref * (pressure of this bubble, read from the file).
-                   // [TBC] `broken` is never set to true in this program, it
-                   // is a leftover of an iterative version.
+                   // `broken` is never set to true in this program.
                    return b.broken ? 0 : pref * b.pressure;
                  }) |
                  or_die) |

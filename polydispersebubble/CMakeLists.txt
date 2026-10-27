@@ -1,8 +1,18 @@
 project(OperaHPCPolydisperseBubble)
 
 # Copy of the `bubble` case for polydisperse bubbles with one pressure per bubble.
+# Code modified by
+# \author E. Cappellari (POLIMI-CEA, 2026)
 
 file(COPY verification/mmm_vs_analytical.py DESTINATION ${PROJECT_BINARY_DIR})
+
+# scripts/ are run from the build folder.
+# configure_file copies them again at each build when they change.
+file(GLOB SCRIPTS CONFIGURE_DEPENDS scripts/*.py scripts/*.sh)
+foreach(script ${SCRIPTS})
+  get_filename_component(name ${script} NAME)
+  configure_file(${script} ${PROJECT_BINARY_DIR}/${name} COPYONLY)
+endforeach()
 
 # behaviour law (MFront -> src/libBehaviour.so in this build folder)
 add_custom_command(
@@ -16,7 +26,7 @@ add_custom_target(lib-elasticity-poly ALL
 
 # build executable
 
-# only the sources of src/ (tools/ contains other programs with their own main)
+# sources of src/
 file( GLOB_RECURSE SRCS src/*.cxx )
 
 add_executable(test-polybubble
