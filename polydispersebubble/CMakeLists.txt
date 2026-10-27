@@ -32,10 +32,6 @@ target_link_libraries(test-polybubble
 target_include_directories(test-polybubble
    PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
-# [TBC] Tool to split a big Gmsh 2.2 mesh into MFEM parallel mesh files.
-# add_executable(partition-mesh tools/PartitionMesh.cxx)
-# target_link_libraries(partition-mesh PUBLIC mfem-mgis::MFEMMGIS)
-
 # copy and install
 
 file(COPY Elasticity.mfront mesh DESTINATION ${PROJECT_BINARY_DIR})
