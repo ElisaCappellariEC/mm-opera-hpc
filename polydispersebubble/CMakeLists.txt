@@ -42,10 +42,14 @@ target_link_libraries(test-polybubble
 target_include_directories(test-polybubble
    PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
+# Tool to split a whole Gmsh 2.2 mesh into one MFEM file per MPI process (-pm 1)
+add_executable(partition-mesh tools/PartitionMesh.cxx)
+target_link_libraries(partition-mesh PUBLIC mfem-mgis::MFEMMGIS)
+
 # copy and install
 
 file(COPY Elasticity.mfront mesh DESTINATION ${PROJECT_BINARY_DIR})
 
 add_test(NAME PolyBubbleTest COMMAND test-polybubble --mesh mesh/mesh_sphere.msh --bubble-file mesh/single_bubble_ci.txt)
 
-install(TARGETS test-polybubble DESTINATION bin)
+install(TARGETS test-polybubble partition-mesh DESTINATION bin)

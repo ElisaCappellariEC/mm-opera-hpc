@@ -65,7 +65,7 @@ for file in "${MESHES[@]}"; do
         echo "Refinement enabled for $DIR: ${EXTRA_ARGS[*]}"
     fi
 
-    mpirun -n 4 ./test-polybubble -m "$file" -f "$BUBBLES" -p 1 -sf 0 -dl 0.5 "${EXTRA_ARGS[@]}"
+    mpirun -n 4 ./test-polybubble -m "$file" -f "$BUBBLES" -p 1 -sf 0 -dl 0.3 "${EXTRA_ARGS[@]}"   # -dl = distMin of Mérope (0.3 um)
     STATUS=$?
     if [[ $STATUS -ne 0 ]]; then
         echo "ERROR: mpirun failed with status $STATUS for $file"
