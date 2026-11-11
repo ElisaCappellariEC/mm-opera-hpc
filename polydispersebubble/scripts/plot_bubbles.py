@@ -7,11 +7,23 @@ sig_hydro.txt (MMM):
     side<L>_seed01_<variant>     the pores of side<L>_seed01 with another mesh; a variant ending in _refinement<k> (or _r<k>)
                                  is its mesh refined k times in MMM (test-polybubble -r k, k = 1 if not written)
 
-Stress factor of a pore (same pressure p in every pore):
+Stress factor of a pore, p its pressure, p_ref = sum(V p) / sum(V) the volume mean of the pressures of the cube:
     sigma = sigma_I_max / p          zero macroscopic strain (MMM)
-    s_hat = (sigma + h) / (1 - h)    zero macroscopic stress, h p = xi p - (1 - xi) <sigma_h> (D5.2), xi the porosity,
-                                     <sigma_h> the mean hydrostatic stress of sig_hydro.txt; used when every cube has it
-A pore breaks when s_hat p > sigma_R; FGR = volume of the broken pores / volume of all the pores depends on p / sigma_R only.
+    s_hat = (sigma + h) / (1 - h)    zero macroscopic stress, same pressure in every pore (the unit runs): h p = xi p -
+                                     (1 - xi) <sigma_h> (D5.2), xi the porosity, <sigma_h> the mean hydrostatic stress of
+                                     the matrix (sig_hydro.txt); used when every cube has it
+    s_hat = sigma + h p_ref (1 + s_hat_1) / p
+                                     zero macroscopic stress, pressure of its class in every pore (the pk cubes of
+                                     set_pressures.py, plan B): MMM gives the stress Sigma = -h p_ref = (1 - xi) <sigma_h> -
+                                     xi p_ref at zero strain; a stress -Sigma, with no pressure in the pores, adds
+                                     -Sigma (I + S_1) to the field, S_1 the field of the unit run of the same cube (its
+                                     folder in mesh_case.txt) at zero stress, whose largest principal stress at the pore is
+                                     s_hat_1. Exact when the pressures are equal (then s_hat = s_hat_1); otherwise it adds
+                                     the maxima of the two runs as if they were at the same point with the same direction
+                                     (the distance between the two points is printed)
+A pore breaks when s_hat p > sigma_R. All the pressures scale with the load x = p_ref / sigma_R: a pore breaks at
+x_c = p_ref / (s_hat p), 1 / s_hat at one pressure; FGR = volume of the broken pores / volume of all the pores, a
+function of x only.
 
 Questions, with Kanit et al., Int. J. Solids Struct. 40 (2003) 3647 (variance D^2 between cubes ~ V^-alpha, alpha = 1 for
 independent pores; one cube is an RVE if 2 D / mean <= EPS_R):
@@ -38,18 +50,20 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
-ROOT = os.path.join("test_rve_side10", "run_NFIR")
+ROOT = os.path.expanduser(os.path.join("~", "mmm", "results", "test_rve_side30_mesh0.15_graded_rfine0.45_delta0.15", "run_NFIR"))  # default: the latest size test (the results live in ~/mmm/results, not in the build tree)
 EPS_R = 0.05             # precision asked on a mean (relative, 95 %)
 EPS_MESH = 0.02          # tolerance on the class means against the reference mesh
 PREF = 1.0               # --pref of the MMM runs
-FGR_LEVELS = (0.05, 0.10, 0.25, 0.50, 0.75, 0.90)  # levels of FGR at which the cubes are compared
-VERDICT_LEVELS = (0.10, 0.90)                      # levels of FGR in the verdict (the onset is a tail)
+FGR_LEVELS = (0.01, 0.015, 0.02, 0.05, 0.10, 0.20, 0.40, 0.80, 0.95)  # levels of FGR at which the cubes are compared
+VERDICT_LEVELS = (0.05, 0.95)                      # levels of FGR in the verdict (10-90 % until 11/11/2026); the
+                                                   # levels below are the tail of the first pores, shown but left out
 MIN_VOLUME_SHARE = 0.05  # classes with less of the pore volume stay out of the verdict
 SIGMA_R_MPA = 275.0      # MPa, sigma_R of D5.2: only for the pressure axis of rve_fgr.png
 D52_SIDE = 30.0          # um, side of the RVE of D5.2
 EXPERIMENT = None        # optional csv with a header and the columns p_MPa,FGR_percent, drawn on rve_fgr.png
 
 STRESSES, HYDRO = "bubbles_and_stresses_selected.txt", "sig_hydro.txt"
+MESH_CASE = "mesh_case.txt"  # in a pk cube of set_pressures.py: the folder of its unit run (same pores and mesh)
 CASE = re.compile(r"side(?P<side>\d+(?:\.\d+)?)_seed(?P<seed>\d+)(?:_(?P<variant>.+))?$")
 REFINED = re.compile(r"(?:^|_)(?:refinement|refined|refine|r)(?P<levels>\d*)$")  # end of a variant refined in MMM
 IN_VERDICT = {lv for lv in FGR_LEVELS if VERDICT_LEVELS[0] - 1e-9 <= lv <= VERDICT_LEVELS[1] + 1e-9}
@@ -104,12 +118,17 @@ def read_cube(folder):
     # pores expected, pores placed)
     summaries = glob.glob(os.path.join(folder, "summary_*.txt"))
     text = open(summaries[0]).read() if summaries else ""
-    m = re.search(r"wall ([\d.eE+-]+) um, bulk ([\d.eE+-]+) um", text)
+    # graded mesh (refine() of merope_pore_pressure.py): "mesh size <wall> um next to the pores, <bulk> um after ...",
+    # and "x R / <r_fine> um" if the size next to the pores below r_fine scales with their radius; uniform: "mesh size <h>"
+    m = (re.search(r"wall ([\d.eE+-]+) um, bulk ([\d.eE+-]+) um", text)
+         or re.search(r"mesh size ([\d.eE+-]+) um next to the pores, ([\d.eE+-]+) um after", text))
     if m:
         geometry = float(m.group(1)), float(m.group(2))
     else:
         m = re.search(r"mesh size ([\d.eE+-]+) um", text)
         geometry = (float(m.group(1)),) * 2 if m else (np.nan, np.nan)
+    m = re.search(r"x R / ([\d.eE+-]+) um", text)
+    r_fine = float(m.group(1)) if m else 0.0  # 0: no size scaled with the radius
     rows = []
     for line in text.splitlines():
         words = line.split()
@@ -139,25 +158,79 @@ def read_cube(folder):
     p = PREF * table["pressure"]
     sigma = table["sigma_I_max"] / p
     R = np.round(table["radius"], 6)
+    V = 4.0 / 3.0 * np.pi * R**3
+    p_ref = np.sum(V * p) / np.sum(V)  # all the pores: those of the table are those of the bubbles file
+    unit_folder = None
+    if os.path.isfile(os.path.join(folder, MESH_CASE)):
+        with open(os.path.join(folder, MESH_CASE)) as f:
+            unit_folder = os.path.normpath(os.path.join(folder, f.readline().strip()))
+    load = "pk" if unit_folder else ("unit" if np.ptp(p) == 0.0 else "mixed")
     cube = {"folder": os.path.basename(folder), "side": side, "seed": int(case["seed"]), "variant": case["variant"],
-            "wall": wall, "bulk": bulk, "refine": levels, "geometry": geometry,
+            "wall": wall, "bulk": bulk, "r_fine": r_fine, "refine": levels, "geometry": geometry,
             "mesh": f"MMM -r {levels}" if levels else "gmsh", "classes": classes, "id": ids, "R": R,
-            "V": 4.0 / 3.0 * np.pi * R**3, "gap": gap, "gap_R": gap / R, "sigma": sigma, "s_hat": None}
+            "V": V, "gap": gap, "gap_R": gap / R, "sigma": sigma, "s_hat": None,
+            "p": p, "p_ref": p_ref, "load": load, "unit": unit_folder, "s_hat_1": None, "max_shift": None,
+            # centre of every pore and point of its maximum (x, y, z of MMM), in the order of the rows above
+            "centre": centres[[row[i] for i in ids]],
+            "max_point": np.column_stack([table[k] for k in "xyz"]) if set("xyz") <= set(table) else None}
     if not np.isfinite(sigma).all():
         print(f"{folder}: {np.count_nonzero(~np.isfinite(sigma))} pores of {len(sigma)} without a stress (nan), left out")
 
     hydro = read_csv(os.path.join(os.path.dirname(stresses), HYDRO))
     if hydro is not None and {"Volume", "Average"} <= set(hydro):
-        if np.ptp(p) > 0.0:
-            print(f"{folder}: pores at different pressures, s_hat rescales with their mean pressure")
         xi = 1.0 - hydro["Volume"][0] / side**3
         xi_pores = np.sum(4.0 / 3.0 * np.pi * radii**3) / side**3
         if abs(xi - xi_pores) > 0.01:
             print(f"{folder}: porosity {xi:.4f} from the volume of {HYDRO}, {xi_pores:.4f} from the pores: wrong side or "
                   "output of another run? s_hat of this cube is suspect")
-        h = xi - (1.0 - xi) * hydro["Average"][0] / p.mean()
-        cube.update(xi=xi, h=h, s_hat=(sigma + h) / (1.0 - h))
+        h = xi - (1.0 - xi) * hydro["Average"][0] / p_ref  # -Sigma / p_ref, Sigma the macroscopic stress at zero strain
+        cube.update(xi=xi, h=h)
+        if load == "unit":
+            cube["s_hat"] = (sigma + h) / (1.0 - h)
+        elif load == "mixed":
+            print(f"{folder}: pores at different pressures and no {MESH_CASE} (the unit run of the same cube, "
+                  "set_pressures.py): s_hat is not computed, sigma only")
+        else:
+            unit = unit_run(folder, unit_folder, ids, bubbles, row)
+            if unit is not None:
+                cube.update(s_hat=sigma + h * p_ref * (1.0 + unit["s_hat"]) / p, s_hat_1=unit["s_hat"],
+                            max_shift=unit["max_shift"])
     return cube
+
+
+def unit_run(folder, unit_folder, ids, bubbles, row):
+    """s_hat_1 of the unit run of the pk cube folder (its mesh_case.txt names unit_folder), in the order of ids, and the
+    distance between the points of the maxima of the two runs; None if the unit run is missing or not solved."""
+    if not os.path.isdir(unit_folder):
+        print(f"{folder}: {unit_folder} of {MESH_CASE} not found: s_hat is not computed, sigma only")
+        return None
+    unit = read_cube(unit_folder)
+    if unit is None or unit["s_hat"] is None or unit["load"] != "unit":
+        print(f"{folder}: the unit run {unit_folder} is not solved (or has no {HYDRO}, or not one pressure): s_hat is "
+              "not computed, sigma only")
+        return None
+    k = {int(i): j for j, i in enumerate(unit["id"])}
+    if set(k) != set(int(i) for i in ids):
+        raise SystemExit(f"{folder}: other pores than its unit run {unit_folder}")
+    order = [k[int(i)] for i in ids]
+    mine = bubbles[[row[i] for i in ids], 1:5]
+    theirs = np.column_stack([unit["centre"], unit["R"]])[order]
+    if not np.allclose(mine, theirs, rtol=0.0, atol=1e-6):
+        raise SystemExit(f"{folder}: the pores differ from those of its unit run {unit_folder} (set_pressures.py)")
+    shift = None
+    if unit["max_point"] is not None:
+        side = float(CASE.match(os.path.basename(folder))["side"])
+        hits = sorted(glob.glob(os.path.join(folder, "**", STRESSES), recursive=True), key=lambda p: (p.count(os.sep), p))
+        table = read_csv(hits[0])
+        if set("xyz") <= set(table):
+            d = np.column_stack([table[c] for c in "xyz"]) - unit["max_point"][order]
+            d -= side * np.round(d / side)
+            shift = np.linalg.norm(d, axis=1)
+            ok = np.isfinite(shift)
+            print(f"{folder}: point of the maximum {np.median(shift[ok]):.3f} um from that of the unit run (median), "
+                  f"{np.quantile(shift[ok], 0.95):.3f} um (95 %), "
+                  f"{100 * np.mean(shift[ok] > 0.5 * unit['R'][order][ok]):.1f} % of the pores beyond R / 2")
+    return {"s_hat": unit["s_hat"][order], "max_shift": shift}
 
 
 def kanit(Z, side):
@@ -185,12 +258,12 @@ def kanit(Z, side):
 
 def percent(share):
     """A share as a percentage, with one decimal below 10 %."""
-    return f"{100 * share:.1f}" if share < 0.1 else f"{100 * share:.0f}"
+    return f"{100 * share:.2f}" if share < 0.1 else f"{100 * share:.0f}"
 
 
 def class_ticks(radii, shares):
     """Tick labels of the classes: radius and share of the pore volume."""
-    return [f"{R:.3g}\n{percent(s)} % vol" for R, s in zip(radii, shares)]
+    return [f"{R:.3g}\n{percent(s)}% vol" for R, s in zip(radii, shares)]
 
 
 def class_color(k, n):
@@ -248,12 +321,23 @@ def analyse_mesh(root, cubes, q):
     pore = {c["folder"]: np.array([100.0 * (value[c["folder"]][i] / value[finest["folder"]][i] - 1.0) for i in ids])
             for c in family}  # every pore against the finest mesh of gmsh (%)
 
-    # reference: Richardson on three wall sizes of gmsh or more, either uniform meshes or graded ones with one bulk size;
+    # reference: Richardson on three wall sizes of gmsh or more, of meshes alike: uniform meshes, graded ones that scale
+    # as a whole (same bulk / wall and r_fine, as the MESH_SIZES of test_rve.py), or graded ones with one bulk size;
     # otherwise the finest mesh of gmsh
     reference, how, extrapolated = means[finest["folder"]], f"the finest mesh of gmsh, {finest['folder']}", False
     failed = None  # (group, sizes, classes) of the last Richardson fit not possible
     uniform = lambda c: bool(np.isclose(c["wall"], c["bulk"], rtol=1e-3))
     groups = [("uniform meshes", [c for c in gmsh if uniform(c)])]
+    alike = []  # graded meshes by bulk / wall and r_fine; the summary rounds the bulk size, hence the tolerance
+    for c in (c for c in gmsh if not uniform(c)):
+        ratio = c["bulk"] / c["wall"]
+        same = next((g for g in alike if np.isclose(g[0], ratio, rtol=5e-3) and np.isclose(g[1], c["r_fine"])), None)
+        if same:
+            same[2].append(c)
+        else:
+            alike.append((ratio, c["r_fine"], [c]))
+    groups += [(f"graded meshes, bulk = {k:.3g} x wall" + (f", x R/{r:g} below R = {r:g} um" if r > 0.0 else ""), g)
+               for k, r, g in alike]
     groups += [(f"bulk {bulk:g} um", [c for c in gmsh if not uniform(c) and c["bulk"] == bulk])
                for bulk in sorted({c["bulk"] for c in gmsh if not uniform(c)})]
     for where, group in groups:
@@ -283,13 +367,16 @@ def analyse_mesh(root, cubes, q):
     if refined:
         lines.append("# - mesh MMM -r k: the mesh of the summary refined k times in MMM (every edge halved each time), "
                      "wall and bulk are its sizes / 2^k; its pore surfaces are those of the coarse mesh")
-    lines += ["# deviation of the class means from the reference (%), then per pore from the finest mesh of gmsh: median "
+    h_small = lambda c: c["wall"] * (min(1.0, min(radii) / c["r_fine"]) if c["r_fine"] > 0.0 else 1.0)  # next to the smallest pore
+    lines += ["# - h/Rmin: mesh size next to the smallest pore / its radius (wall size, or less if it scales with the "
+              "radius below r_fine)",
+              "# deviation of the class means from the reference (%), then per pore from the finest mesh of gmsh: median "
               "and largest |d| (%)",
-              f"# {'folder':<38s}{'wall':>7s}{'bulk':>7s}{'mesh':>10s}{'w/Rmin':>7s}" + "".join(f"{n:>8s}" for n in names)
+              f"# {'folder':<38s}{'wall':>7s}{'bulk':>7s}{'mesh':>10s}{'h/Rmin':>7s}" + "".join(f"{n:>8s}" for n in names)
               + f"{'med|d|':>8s}{'max|d|':>8s}",
               f"# {'share of the pore volume (%)':<{width}s}" + "".join(f"{100 * s:8.1f}" for s in shares) + f"{100.0:8.1f}"]
     for c in family:
-        lines.append(f"  {c['folder']:<38s}{c['wall']:7g}{c['bulk']:7g}{c['mesh']:>10s}{c['wall'] / min(radii):7.2f}"
+        lines.append(f"  {c['folder']:<38s}{c['wall']:7.4g}{c['bulk']:7.4g}{c['mesh']:>10s}{h_small(c) / min(radii):7.2f}"
                      + "".join(f"{x:8.2f}" for x in deviation[c["folder"]])
                      + f"{np.median(np.abs(pore[c['folder']])):8.2f}{np.abs(pore[c['folder']]).max():8.2f}")
 
@@ -367,8 +454,9 @@ def analyse_mesh(root, cubes, q):
     with open(os.path.join(root, "mesh_test.txt"), "w") as f:
         f.write("\n".join(lines) + "\n")
 
-    # figure: class means against the reference, then every pore against the finest mesh of gmsh
-    fig, ax = plt.subplots(1, 2, figsize=(14.0, 5.0))
+    # figure: class means against the reference (the per-pore scatter against the gap was dropped on 11/11/2026: it
+    # only showed the mesh noise per pore, whose median and largest value are in mesh_test.txt)
+    fig, ax = plt.subplots(figsize=(8.5, 5.0))
     width_bar = 0.8 / max(len(compared), 1)
     big = max(abs(deviation[c["folder"]]).max() for c in compared) > 20.0
     shaded = [c for c in compared if not c["refine"]]  # meshes of gmsh, finest first: darkest to lightest blue
@@ -378,47 +466,28 @@ def analyse_mesh(root, cubes, q):
         x = np.arange(len(names)) - 0.4 + width_bar * (j + 0.5)
         d = deviation[c["folder"]]
         how_made = (f", the {c['geometry'][0]:g} um mesh refined {c['refine']}x in MMM" if c["refine"] else "")
-        ax[0].bar(x, d, width=0.9 * width_bar, zorder=2, hatch="//" if c["refine"] else None,
+        ax.bar(x, d, width=0.9 * width_bar, zorder=2, hatch="//" if c["refine"] else None,
                   color=REFINED_COLOR if c["refine"] else shade[c["folder"]],
                   edgecolor="white" if c["refine"] else None,
-                  label=f"{c['folder']} (wall {c['wall']:g}, bulk {c['bulk']:g} um{how_made})")
+                  label=f"{c['folder']} (wall {c['wall']:.3g}, bulk {c['bulk']:.3g} um{how_made})")
         for xk, dk in zip(x, d):
-            ax[0].annotate(f"{dk:.1f}", (xk, dk), ha="center", va="bottom" if dk >= 0 else "top", fontsize=7,
+            ax.annotate(f"{dk:.1f}", (xk, dk), ha="center", va="bottom" if dk >= 0 else "top", fontsize=9,
                            xytext=(0, 2 if dk >= 0 else -2), textcoords="offset points")
-    ax[0].axhspan(-100 * EPS_MESH, 100 * EPS_MESH, color=GRID, lw=0, zorder=0, label=rf"$\pm${100 * EPS_MESH:g} %")
-    ax[0].axhline(0.0, color=REFERENCE_LINE, lw=0.8)
-    ax[0].set_xticks(range(len(names)), class_ticks(radii, shares) + ["all\npores"])
-    ax[0].set(xlabel="radius of the class (um) and its share of the pore volume",
+    ax.axhspan(-100 * EPS_MESH, 100 * EPS_MESH, color=GRID, lw=0, zorder=0, label=rf"$\pm${100 * EPS_MESH:g} %")
+    ax.axhline(0.0, color=REFERENCE_LINE, lw=0.8)
+    ax.set_xticks(range(len(names)), class_ticks(radii, shares) + ["all\npores"])
+    ax.set(xlabel="radius of the class (um) and its share of the pore volume",
               ylabel="class mean against the reference (%)" + (" (symlog)" if big else ""),
               title="Class means against " + ("the extrapolated value (Richardson)" if extrapolated else
-                                              f"the finest mesh of gmsh ({finest['wall']:g} um)\n(its own error is not "
-                                              "measured)"))
-    ax[0].margins(y=0.1)
-    others = [c for c in compared if c is not finest]
-    x_pore = np.array([gap_R[i] for i in ids])
-    for k, c in enumerate(others):
-        marker = "x" if c["refine"] else "osd^v"[k % 5]
-        for kr, Rk in enumerate(radii):
-            sel = np.array([R[i] == Rk for i in ids])
-            ax[1].scatter(x_pore[sel], pore[c["folder"]][sel], s=20 if c["refine"] else 16, marker=marker,
-                          zorder=3 if c["refine"] else 2, color=class_color(kr, len(radii)),
-                          label=f"R = {Rk:.3g} um" if k == 0 else None)
-        if len(others) > 1:
-            ax[1].scatter([], [], marker=marker, color=REFERENCE_LINE,
-                          label=f"{c['folder']} (wall {c['wall']:g} um, {c['mesh']})")
-    ax[1].axhspan(-100 * EPS_MESH, 100 * EPS_MESH, color=GRID, lw=0, zorder=0)
-    ax[1].axhline(0.0, color=REFERENCE_LINE, lw=0.8)
-    ax[1].set(xscale="log", xlabel="gap to the nearest pore / radius of the pore",
-              ylabel=f"{LABEL[q]} against the finest mesh of gmsh (%)" + (" (symlog)" if big else ""),
-              title=f"Every pore of side{side:g}_seed01:\nother meshes against the finest mesh of gmsh ({finest['wall']:g} um)")
-    for a, columns in zip(ax, (1, 2)):  # legends under the axes
-        if big:  # symlog, linear within +/- 5 %
-            a.set_yscale("symlog", linthresh=5.0)
-            low, high = a.get_ylim()
-            ticks = [t for t in (-200, -100, -50, -20, -10, -5, -2, 0, 2, 5, 10, 20, 50, 100, 200) if low <= t <= high]
-            a.set_yticks(ticks, [f"{t:g}" for t in ticks])
-        a.grid(True, color=GRID)
-        a.legend(frameon=False, fontsize=7, loc="upper center", bbox_to_anchor=(0.5, -0.21), ncol=columns)
+                                              f"the finest mesh available ({finest['wall']:g} um)"))
+    ax.margins(y=0.1)
+    if big:  # symlog, linear within +/- 5 %
+        ax.set_yscale("symlog", linthresh=5.0)
+        low, high = ax.get_ylim()
+        ticks = [t for t in (-200, -100, -50, -20, -10, -5, -2, 0, 2, 5, 10, 20, 50, 100, 200) if low <= t <= high]
+        ax.set_yticks(ticks, [f"{t:g}" for t in ticks])
+    ax.grid(True, color=GRID)
+    ax.legend(frameon=False, fontsize=9, loc="upper center", bbox_to_anchor=(0.5, -0.25))  # under the axes
     fig.tight_layout()
     fig.savefig(os.path.join(root, "mesh_test.png"), dpi=150, bbox_inches="tight")
     plt.close(fig)
@@ -452,15 +521,21 @@ def side_for(info, k, pores):
 
 # ---- 3. FGR of every cube (D5.2 Fig. 7) ------------------------------------------------------------------------------
 
+def critical_x(cube, s):
+    """x_c = p_ref / (s p) of every pore of the cube, s its stress factor: the load x = p_ref / sigma_R at which s p x /
+    p_ref reaches 1 (all the pressures scale together); 1 / s at one pressure, infinite for s <= 0 or nan."""
+    ok = np.isfinite(s) & (s > 0.0)
+    return np.where(ok, 1.0 / np.where(ok, s * cube["p"] / cube["p_ref"], 1.0), np.inf)
+
+
 def critical_pressures(cube, q):
-    """x_c = p_c / sigma_R = 1 / q of the pores with a value (infinite for q <= 0), and their volumes."""
+    """x_c (critical_x) of the pores with a value of q, and their volumes."""
     ok = np.isfinite(cube[q])
-    s, V = cube[q][ok], cube["V"][ok]
-    return np.where(s > 0.0, 1.0 / np.where(s > 0.0, s, 1.0), np.inf), V
+    return critical_x(cube, cube[q])[ok], cube["V"][ok]
 
 
 def fgr_curve(cube, q, x):
-    """FGR of a cube at the normalised pressures x = p / sigma_R."""
+    """FGR of a cube at the normalised loads x = p_ref / sigma_R."""
     xc, V = critical_pressures(cube, q)
     return (xc[None, :] < x[:, None]) @ V / V.sum()
 
@@ -486,6 +561,23 @@ def draw_fgr(ax, by_side, q, x, single, legend=True):
                 if legend else None)
 
 
+def smallest_rve_level(stats, side, key):
+    """Smallest level of FGR from which the RVE side `key` ('rve' or 'rve_high') of stats {level: kanit} stays below the
+    side of the cubes, linear in log(RVE / side) between the two levels around the last crossing; text."""
+    levels = [lv for lv in sorted(stats) if np.isfinite(stats[lv][key])]
+    if not levels:
+        return "unknown (fewer than 3 cubes)"
+    f = [np.log(stats[lv][key] / side) for lv in levels]
+    failing = [k for k, v in enumerate(f) if v > 0.0]
+    if not failing:
+        return f"every level from {100 * levels[0]:g} %"
+    k = failing[-1]
+    if k == len(levels) - 1:
+        return f"none up to {100 * levels[-1]:g} %"
+    lv = levels[k] + (levels[k + 1] - levels[k]) * f[k] / (f[k] - f[k + 1])
+    return f"{100 * lv:.1f} %"
+
+
 def analyse_fgr(root, by_side, q):
     """FGR of every cube and Kanit statistics of the critical pressure at every level of FGR_LEVELS, per side; writes
     rve_fgr.txt/png. Returns ({side: {level: stats}}, scaling rows)."""
@@ -500,7 +592,8 @@ def analyse_fgr(root, by_side, q):
         stats[L] = {lv: kanit([x[k] for x in x_levels], L) for k, lv in enumerate(FGR_LEVELS)}
     lines = [f"# 3. FGR of every cube, as OperaHPC D5.2 Fig. 7 ({q}; python3 plot_bubbles.py {root})",
              f"# - a pore breaks when {q} p > sigma_R; FGR(p) = volume of the broken pores / volume of all the pores",
-             "# - x_c = p / sigma_R at which the FGR of a cube reaches the level (mean over the cubes +/- 2 D / sqrt(n))",
+             "# - x_c = p_ref / sigma_R at which the FGR of a cube reaches the level (mean over the cubes +/- 2 D / sqrt(n)); "
+             "p_ref = sum(V p) / sum(V), the pressure of every pore when they all have the same",
              f"# - p_MPa = mean_x_c x {SIGMA_R_MPA:g} MPa, the sigma_R of D5.2 (monodisperse pores: to recalibrate)",
              f"# - eps_cube = 2 D / mean: error of x_c, i.e. of a sigma_R calibrated on the release, from one cube",
              f"# - cubes = (eps_cube / {100 * EPS_R:g} %)^2 cubes of this side; RVE_um = side x cubes^(1/3) (alpha = 1), "
@@ -510,14 +603,18 @@ def analyse_fgr(root, by_side, q):
                   f"#  {'FGR_%':>5s}{'mean_x_c':>10s}{'+/-':>8s}{'D':>10s}{'eps_cube_%':>11s}{'cubes':>7s}{'RVE_um':>8s}"
                   f"{'[95 %]':>10s}{'p_MPa':>8s}"]
         for level, r in stats[L].items():
-            note = "" if level in IN_VERDICT else "   (onset: a tail, not in the verdict)"
+            note = "" if level in IN_VERDICT else f"   (below {100 * VERDICT_LEVELS[0]:g} %: a tail, not in the verdict)"
             if np.isnan(r["cubes"]):
-                lines.append(f"   {100 * level:5.0f}{r['mean']:10.4f}   fewer than 3 cubes{note}")
+                lines.append(f"   {100 * level:5.3g}{r['mean']:10.4f}   fewer than 3 cubes{note}")
                 continue
-            lines.append(f"   {100 * level:5.0f}{r['mean']:10.4f}{r['half']:8.4f}{np.sqrt(r['D2']):10.2e}"
+            lines.append(f"   {100 * level:5.3g}{r['mean']:10.4f}{r['half']:8.4f}{np.sqrt(r['D2']):10.2e}"
                          f"{100 * r['eps']:11.2f}{r['cubes']:7.1f}{r['rve']:8.1f}{r['interval']:>10s}"
                          f"{SIGMA_R_MPA * r['mean']:8.1f}{note}")
-    rows, scaling_text = scaling(stats, "FGR level", lambda level: f"{100 * level:5.0f} %")
+        lines.append(f"# smallest level of FGR from which one cube of {L:g} um is an RVE: "
+                     f"{smallest_rve_level(stats[L], L, 'rve')} (best estimate), "
+                     f"{smallest_rve_level(stats[L], L, 'rve_high')} (upper bound of the 95 % interval of the RVE side); "
+                     "linear between the levels")
+    rows, scaling_text = scaling(stats, "FGR level", lambda level: f"{100 * level:5.3g} %")
     lines += scaling_text
     with open(os.path.join(root, "rve_fgr.txt"), "w") as f:
         f.write("\n".join(lines) + "\n")
@@ -538,13 +635,17 @@ def analyse_fgr(root, by_side, q):
     if experiment is not None:
         ax[0].plot(experiment[0] / SIGMA_R_MPA, experiment[1], "*", color=EXPERIMENT_COLOR, ms=9,
                    label=f"experiment (p / {SIGMA_R_MPA:g} MPa)")
-    ax[0].set(xlim=(x[0], x[-1]), ylim=(0.0, 100.0), xlabel=r"$p / \sigma_R$ (pore pressure / rupture stress)",
+    pk = any(c["load"] != "unit" for cubes in by_side.values() for c in cubes)
+    ax[0].set(xlim=(x[0], x[-1]), ylim=(0.0, 100.0),
+              xlabel=(r"$p_{ref} / \sigma_R$ (volume mean of the pore pressures / rupture stress)" if pk
+                      else r"$p / \sigma_R$ (pore pressure / rupture stress)"),
               ylabel="FGR (% of the pore volume)",
-              title="FGR of every cube (as D5.2 Fig. 7)" + ("" if q == "s_hat" else ", zero macroscopic strain"))
+              title="FGR of every cube" + ("" if q == "s_hat" else ", zero macroscopic strain"))
     top = ax[0].secondary_xaxis("top", functions=(lambda v: v * SIGMA_R_MPA, lambda v: v / SIGMA_R_MPA))
-    top.set_xlabel(rf"pore pressure (MPa) for $\sigma_R$ = {SIGMA_R_MPA:g} MPa (value of D5.2, to recalibrate)", fontsize=8)
+    top.set_xlabel(rf"{'p_ref' if pk else 'pore pressure'} (MPa) for $\sigma_R$ = {SIGMA_R_MPA:g} MPa (value of D5.2, to "
+                   "recalibrate)")
     ax[0].grid(True, color=GRID)
-    ax[0].legend(loc="upper left", frameon=False, fontsize=7, ncol=2)
+    ax[0].legend(loc="upper left", frameon=False, fontsize=9, ncol=2)
     zoom = ax[0].inset_axes([0.60, 0.08, 0.37, 0.40])
     first = np.mean([fgr_curve(c, q, x) for L in by_side for c in by_side[L]], axis=0)
     end = x[min(np.searchsorted(first, 0.30), len(x) - 1)]
@@ -552,27 +653,30 @@ def analyse_fgr(root, by_side, q):
     if experiment is not None:
         zoom.plot(experiment[0] / SIGMA_R_MPA, experiment[1], "*", color=EXPERIMENT_COLOR, ms=7)
     zoom.set(xlim=(x[0], end), ylim=(0.0, 30.0), title="zoom on the onset")
-    zoom.title.set_fontsize(8)
-    zoom.tick_params(labelsize=7)
+    zoom.title.set_fontsize(9)
+    zoom.tick_params(labelsize=9)
     zoom.grid(True, color=GRID)
 
-    ax[1].axhspan(0.0, 100 * EPS_R, color=GRID, alpha=0.8, lw=0, label=f"one cube is an RVE ({100 * EPS_R:g} %)")
+    ax[1].axhspan(0.0, 100 * EPS_R, color=GRID, alpha=0.8, lw=0, label=f"one cube is an RVE ({100 * EPS_R:g}%)")
     for k, L in enumerate(sorted(by_side)):
         levels = [lv for lv in FGR_LEVELS if np.isfinite(stats[L][lv]["eps"])]
         eps = np.array([100 * stats[L][lv]["eps"] for lv in levels])
         color = SEQ_BLUE[3] if single else plt.get_cmap("tab10")(k % 10)
         ax[1].plot([100 * lv for lv in levels], eps, "-", color=color, lw=1.2,
                    label=f"side {L:g} um ({len(by_side[L])} cubes)")
-        for lv, e in zip(levels, eps):
+        for i_lv, (lv, e) in enumerate(zip(levels, eps)):
             r = stats[L][lv]
             ax[1].plot(100 * lv, e, "o", ms=6, color=color, mfc=color if lv in IN_VERDICT else "white")
-            ax[1].annotate(f"{r['rve']:.0f} um", (100 * lv, e), xytext=(0, 6), textcoords="offset points", ha="center",
-                           fontsize=7, color=color)
-    ax[1].set(xlabel="level of FGR (%)", ylabel=r"error of one cube on $x_c$, $2D$ / mean (%)", ylim=(0.0, None),
-              title="Error of one cube; labels: side of the RVE (alpha = 1)")
-    ax[1].plot([], [], "o", color=REFERENCE_LINE, mfc="white", label="onset: not in the verdict")
+            up = i_lv % 2 == 0  # close levels: labels above and below in turn, so that they do not overlap
+            ax[1].annotate(f"{r['rve']:.0f} um", (100 * lv, e), xytext=(6 if up else -6, 7 if up else -7),
+                           textcoords="offset points", ha="left" if up else "right", va="bottom" if up else "top", fontsize=9, color=REFERENCE_LINE)
+    ax[1].set(xlabel="level of FGR (%), log scale", ylabel=r"error of one cube on $x_c$, $2D$ / mean (%)", ylim=(0.0, None),
+              xscale="log", title="Error of one cube; labels: side of the RVE")
+    ax[1].set_xticks([1, 2, 5, 10, 20, 40, 80, 95], ["1", "2", "5", "10", "20", "40", "80 ", " 95"])
+    ax[1].minorticks_off()
+    ax[1].plot([], [], "o", color=REFERENCE_LINE, mfc="white", label=f"outside {100 * VERDICT_LEVELS[0]:g}-{100 * VERDICT_LEVELS[1]:g}%")
     ax[1].grid(True, color=GRID)
-    ax[1].legend(frameon=False, fontsize=8)
+    ax[1].legend(frameon=False, fontsize=9)
     fig.tight_layout()
     fig.savefig(os.path.join(root, "rve_fgr.png"), dpi=150)
     plt.close(fig)
@@ -648,7 +752,7 @@ def verdict(cubes, info, fgr, classes, class_rows, fgr_rows, mesh_summary):
         lines += [f"# one cube of {L:g} um is NOT an RVE",
                   f"# side of the RVE: {side:.0f} um (95 %: {worst['interval']} um), set by {why}; or the mean of "
                   f"{np.ceil(worst['cubes']):.0f} cubes of {L:g} um"]
-    for what, cands in (("on the FGR (levels 10-90 %)", on_fgr), ("on the classes of the verdict", on_classes)):
+    for what, cands in ((f"on the FGR (levels {100 * VERDICT_LEVELS[0]:g}-{100 * VERDICT_LEVELS[1]:g} %)", on_fgr), ("on the classes of the verdict", on_classes)):
         if cands:
             s, r, w = max(cands, key=lambda t: t[0])
             lines.append(f"#   {what}: {s:.0f} um ({r['interval']}), {w}")
@@ -760,7 +864,7 @@ def analyse_size(root, by_side, main, q, infos, fgr_by_side, fgr_rows, mesh_summ
                 a.loglog(V, r["D2"][0] * V[0] / V, ":", color=color, lw=0.8)
             a.set(xlabel="volume of the cube (um$^3$)", ylabel=ylabel, title=what + r"; dotted: $D^2 \sim 1/V$ (alpha = 1)")
             a.grid(True, color=GRID, which="both")
-            a.legend(frameon=False, fontsize=8)
+            a.legend(frameon=False, fontsize=9)
         fig.tight_layout()
         fig.savefig(os.path.join(root, "rve_scaling.png"), dpi=150)
         plt.close(fig)
@@ -774,7 +878,7 @@ def analyse_size(root, by_side, main, q, infos, fgr_by_side, fgr_rows, mesh_summ
     side = cubes[0]["side"]
     radii = [r["R"] for r in results]
     shares = [r["share"] for r in results]
-    fig, ax = plt.subplots(1, 3, figsize=(18.0, 5.4))
+    fig, ax = plt.subplots(1, 2, figsize=(12.5, 5.4))
     spread = np.linspace(-0.32, 0.12, max(len(cubes), 2))
     for i, r in enumerate(results):
         for j, c in enumerate(cubes):
@@ -789,7 +893,9 @@ def analyse_size(root, by_side, main, q, infos, fgr_by_side, fgr_rows, mesh_summ
     ax[0].plot([], [], "o", color=REFERENCE_LINE, label="mean of the class in one cube (colour: seed)")
     ax[0].set_xticks(range(len(radii)), class_ticks(radii, shares))
     ax[0].set(xlabel="radius of the class (um) and its share of the pore volume", ylabel=f"class mean of {LABEL[q]}",
-              title="Z of Kanit: the class mean in every cube")
+              title="Class mean of every cube")
+    low, high = ax[0].get_ylim()
+    ax[0].set_ylim(low, high + 0.28 * (high - low))  # room for the legend above the points
 
     for i, r in enumerate(results):
         if not np.isfinite(r["rve"]):
@@ -799,31 +905,30 @@ def analyse_size(root, by_side, main, q, infos, fgr_by_side, fgr_rows, mesh_summ
         ax[1].errorbar(i, r["rve"], yerr=[[r["rve"] - r["rve_low"]], [r["rve_high"] - r["rve"]]], color=color, marker="o",
                        ms=7, mfc=color if used else "white", lw=0, elinewidth=1.4, capsize=4)
         ax[1].annotate(f"{r['rve']:.0f}", (i, r["rve"]), xytext=(8, 0), textcoords="offset points", va="center",
-                       fontsize=8, color=color)
-    ax[1].axhline(side, color=REFERENCE_LINE, ls="--", lw=1.2, label=f"these cubes, {side:g} um")
+                       fontsize=9, color=color)
+    #ax[1].axhline(side, color=REFERENCE_LINE, ls="--", lw=1.2, label=f"these cubes, {side:g} um")
     ax[1].axhline(D52_SIDE, color=D52_COLOR, ls=":", lw=1.4, label=f"RVE of D5.2, {D52_SIDE:g} um")
     ax[1].plot([], [], "o", color=REFERENCE_LINE, mfc="white",
-               label=f"below {100 * MIN_VOLUME_SHARE:g} % of the pore volume: not in the verdict")
+               label=f"below {100 * MIN_VOLUME_SHARE:g}% of the pore volume: not in the verdict")
     missing = [k for k in info["missing"] if info["real"][k] >= 0.001] if info is not None else []
     if missing:
         text = "not in the cubes: " + "; ".join(f"R = {info['R'][k]:.2f} um ({percent(info['real'][k])} % of the "
                                                f"pore volume)" for k in missing)
-        ax[1].text(0.02, 0.02, text, transform=ax[1].transAxes, fontsize=8, color=D52_COLOR)
+        ax[1].text(0.02, 0.02, text, transform=ax[1].transAxes, fontsize=9, color=D52_COLOR)
     highest = max([D52_SIDE] + [r["rve_high"] for r in results if np.isfinite(r["rve_high"])])
     ax[1].set_xticks(range(len(radii)), class_ticks(radii, shares))
     ax[1].set(xlabel="radius of the class (um) and its share of the pore volume", ylim=(0.0, 1.35 * highest),
+              xlim=(-0.5, len(radii) - 0.45),
               ylabel="side of one cube that is an RVE (um)",
-              title=f"Side for {100 * EPS_R:g} % on the class mean (alpha = 1, 95 % interval)")
+              title=f"Side for {100 * EPS_R:g}% error on the class mean")
 
-    for k, r in enumerate(results):
-        gap_R = np.concatenate([c["gap_R"][c["R"] == r["R"]] for c in cubes])
-        v = np.concatenate([c[q][c["R"] == r["R"]] for c in cubes])
-        ax[2].scatter(gap_R, v, s=10, color=class_color(k, len(results)), label=f"R = {r['R']:.3g} um")
-    ax[2].set(xscale="log", xlabel="gap to the nearest pore / radius of the pore", ylabel=LABEL[q],
-              title="The stress factor follows the nearest ligament")
-    for a, where in zip(ax, ("upper left", "upper left", "upper right")):
+    # (the scatter of s_hat against gap / R, third panel until 11/11/2026, was dropped: with distMin fixed in um the
+    # classes sit side by side on that axis; s_hat against the gap in um is the first panel of break_order.png)
+    for a, where in zip(ax, ("upper left", "upper left")):
         a.grid(True, color=GRID)
-        a.legend(frameon=False, fontsize=8, loc=where)
+        legend = a.legend(frameon=False, fontsize=9, loc=where)
+        for handle in legend.legend_handles:
+            handle.set_alpha(1.0)
     fig.tight_layout()
     fig.savefig(os.path.join(root, "rve_size.png"), dpi=150)
     plt.close(fig)
