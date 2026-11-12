@@ -331,7 +331,7 @@ def figure(root, cubes, cls, radii):
     a.set_xticks(ticks, [f"{t:g}" for t in ticks])
     a.minorticks_off()
     legend = a.legend(frameon=False, fontsize=9, markerscale=3, loc="upper right")
-    for handle in legend.legend_handles:
+    for handle in getattr(legend, "legend_handles", None) or legend.legendHandles:  # legendHandles: matplotlib < 3.7
         handle.set_alpha(1.0)
 
     finite = np.isfinite(xc)

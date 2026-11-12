@@ -927,7 +927,7 @@ def analyse_size(root, by_side, main, q, infos, fgr_by_side, fgr_rows, mesh_summ
     for a, where in zip(ax, ("upper left", "upper left")):
         a.grid(True, color=GRID)
         legend = a.legend(frameon=False, fontsize=9, loc=where)
-        for handle in legend.legend_handles:
+        for handle in getattr(legend, "legend_handles", None) or legend.legendHandles:  # legendHandles: matplotlib < 3.7
             handle.set_alpha(1.0)
     fig.tight_layout()
     fig.savefig(os.path.join(root, "rve_size.png"), dpi=150)

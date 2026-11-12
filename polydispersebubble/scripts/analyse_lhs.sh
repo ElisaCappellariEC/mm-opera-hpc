@@ -71,13 +71,14 @@ echo "Found ${#RUNS[@]} run folders in $LHS (${#UNIT[@]} unit)."
 
 # Runs the script $1 on the run folder $2, output in $2/<name of the script>.log; prints its last line if it fails
 analyse() {
-    local script=$1 run=$2 log
+    local script=$1 run=$2 log status
     log="$run/${script%.py}.log"
-    if "$PYTHON" "$HERE/$script" "$run" > "$log" 2>&1; then
-        return 0
+    "$PYTHON" "$HERE/$script" "$run" > "$log" 2>&1
+    status=$?
+    if [[ $status -ne 0 ]]; then
+        echo "    $script: exit $status ($(tail -n 1 "$log")), see $log"
     fi
-    echo "    $script: exit $? ($(tail -n 1 "$log")), see $log"
-    return 1
+    return $status
 }
 
 DONE=0
@@ -142,10 +143,12 @@ elif [[ ! -f "$SURROGATE" ]]; then
     echo "mmm_surrogate.py not found ($SURROGATE): set SURROGATE=<path> to write the tables of s_hat."
 else
     echo "mmm_surrogate.py on ${#READY[@]} unit runs (log: $LHS/mmm_surrogate.log)"
-    if "$PYTHON" "$SURROGATE" "${READY[@]}" > "$LHS/mmm_surrogate.log" 2>&1; then
+    "$PYTHON" "$SURROGATE" "${READY[@]}" > "$LHS/mmm_surrogate.log" 2>&1
+    STATUS=$?
+    if [[ $STATUS -eq 0 ]]; then
         grep "^wrote" "$LHS/mmm_surrogate.log" | sed 's/^/    /'
     else
-        echo "    mmm_surrogate.py: exit $? ($(tail -n 1 "$LHS/mmm_surrogate.log")), see $LHS/mmm_surrogate.log"
+        echo "    mmm_surrogate.py: exit $STATUS ($(tail -n 1 "$LHS/mmm_surrogate.log")), see $LHS/mmm_surrogate.log"
         FAILED+=("mmm_surrogate.py")
     fi
 fi
