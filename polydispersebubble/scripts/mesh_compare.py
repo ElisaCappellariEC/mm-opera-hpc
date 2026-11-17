@@ -9,10 +9,10 @@ bubbles_<run>.txt must be identical). Compared on s_hat:
                  uncertainty of that mean from the number of cubes
     FGR          x_c = p / sigma_R at the levels of FGR_LEVELS, mean over the cubes, and the FGR curves
     RVE          side of one cube that is an RVE, per class and on the FGR (Kanit, alpha = 1, as plot_bubbles.py)
-    mesh size    the variants side<L>_seed01_<variant> of each ROOT (e.g. meshdouble) against its side<L>_seed01
 Cost, from the logs of the cluster jobs in every cube (SLURM summary at the end of each .err): mesh of partition-mesh,
 unknowns of MMM, core-hours (cores x elapsed) of partition-mesh, of the runs of MMM that solved and of those that
 failed, cores and memory per process (MaxRSS) of the run that solved.
+The mesh variants side<L>_seed01_<variant> are left out: plot_bubbles.py compares them (mesh_test.txt).
 
 Writes in OTHER: NAME.txt, NAME.png
 Usage: python3 mesh_compare.py REFERENCE OTHER
@@ -59,12 +59,6 @@ def pores_file(folder):
     return files[0] if len(files) == 1 else None
 
 
-def class_mean(cube, R):
-    """Mean of s_hat over the pores of class R of one cube (nan if the cube has none)."""
-    v = cube["s_hat"][(cube["R"] == R) & np.isfinite(cube["s_hat"])]
-    return v.mean() if len(v) else np.nan
-
-
 def slurm(err):
     """Job of the cluster from the SLURM summary at the end of its .err: cores, nodes, elapsed (s), state and tasks of its
     program (partition-mesh or test-polybubble), MaxRSS of one process (GB). None without the summary."""
@@ -99,24 +93,23 @@ def main():
     roots = sys.argv[1:]
 
     # %% the cubes of the two ROOTs, with the mesh of the summary of Mérope -------------------------------------------
-    loaded = []  # per ROOT: solved cubes by folder name, folders not solved yet
+    loaded = []  # per ROOT: solved cubes by folder name
     for root in roots:
-        solved, unsolved = {}, []
+        solved = {}
         for folder in sorted(glob.glob(os.path.join(root, "side*_seed*"))):
             name = os.path.basename(folder)
             if not (os.path.isdir(folder) and pb.CASE.match(name)):
                 continue
             cube = pb.read_cube(folder)
             if cube is None:
-                unsolved.append(name)
                 continue
             w, b = cube["wall"], cube["bulk"]
             cube["path"] = folder
             cube["mesh_label"] = (name if not np.isfinite(w) else f"uniform {w:g} um" if w == b else
                                   f"graded {w:g}-{b:g} um" + (f", x R/{cube['r_fine']:g} below" if cube["r_fine"] else ""))
             solved[name] = cube
-        loaded.append((solved, unsolved))
-    (ref_all, _), (oth_all, _) = loaded
+        loaded.append(solved)
+    ref_all, oth_all = loaded
     common = sorted(n for n in set(ref_all) & set(oth_all) if ref_all[n]["variant"] is None)
     if not common:
         raise SystemExit(f"no cube side<L>_seed<NN> solved in both {roots[0]} and {roots[1]}")
@@ -151,7 +144,10 @@ def main():
     classes = np.array([s["R"] for s in stats[0]])
     share = np.array([s["share"] for s in stats[0]])
     verdict_class = share >= pb.MIN_VOLUME_SHARE
-    Z = [np.array([[class_mean(c, R) for R in classes] for c in cubes]) for cubes in (refs, oths)]
+    Z = []  # class means of s_hat of every cube (nan if the cube has no pore of the class), REFERENCE and OTHER
+    for cubes in (refs, oths):
+        values = [[c["s_hat"][(c["R"] == R) & np.isfinite(c["s_hat"])] for R in classes] for c in cubes]
+        Z.append(np.array([[v.mean() if len(v) else np.nan for v in row] for row in values]))
     d_cube = 100.0 * (Z[1] / Z[0] - 1.0)
     d_mean = 100.0 * (np.nanmean(Z[1], axis=0) / np.nanmean(Z[0], axis=0) - 1.0)
     noise = np.array([100.0 * s["half"] / s["mean"] for s in stats[0]])  # 2 D / sqrt(n) / mean of REFERENCE
@@ -168,19 +164,7 @@ def main():
     curves = [np.array([pb.fgr_curve(c, x) for c in cubes]) for cubes in (refs, oths)]
     gap_fgr = 100.0 * np.abs(curves[1].mean(axis=0) - curves[0].mean(axis=0)).max()
 
-    # %% 4. mesh size: the variants side<L>_seed01_<variant> of each ROOT against its side<L>_seed01 ----------------------
-    var = []
-    for solved, unsolved in loaded:
-        rows = []
-        for name, cube in solved.items():
-            base = solved.get(f"side{cube['side']:g}_seed{cube['seed']:02d}")
-            if cube["variant"] is None or base is None:
-                continue
-            d = [100.0 * (class_mean(cube, R) / class_mean(base, R) - 1.0) for R in classes]
-            rows.append({"label": cube["mesh_label"], "base": base["mesh_label"], "d": np.array(d)})
-        var.append((rows, [name for name in unsolved if pb.CASE.match(name)["variant"]]))
-
-    # %% 5. cost: core-hours of partition-mesh, of MMM solved and of MMM failed, mesh and unknowns, per set of cubes ------
+    # %% 4. cost: core-hours of partition-mesh, of MMM solved and of MMM failed, mesh and unknowns, per set of cubes ------
     costs = []  # None for a set of cubes without the logs
     for cubes in (refs, oths):
         per_cube = []
@@ -268,15 +252,7 @@ def main():
                      f"{f0.get('interval', ''):>7s} {f1['rve']:6.1f} {f1.get('interval', ''):>7s}"
                      + ("" if lv in pb.IN_VERDICT else "   (tail: not in the verdict)"))
     lines.append(f"# largest gap between the mean FGR curves: {gap_fgr:.2f} points of FGR")
-    lines += ["#", "# 4. Size of the mesh: variants of side<L>_seed01 against side<L>_seed01 of the same ROOT, d of the "
-                   "class means (%)",
-              "#  " + " " * 52 + "".join(f"{R:8.3f}" for R in classes)]
-    for (rows, missing), root in zip(var, roots):
-        for r in rows:
-            lines.append(f"  {r['label'] + ' against ' + r['base']:52s}" + "".join(ps(v) + " " for v in r["d"]))
-        for name in missing:
-            lines.append(f"  {name} ({os.path.basename(os.path.dirname(os.path.abspath(root)))}): not solved")
-    lines += ["#", "# 5. Cost on the cluster (logs of the jobs; core-hours = cores x elapsed of the jobs)"]
+    lines += ["#", "# 4. Cost on the cluster (logs of the jobs; core-hours = cores x elapsed of the jobs)"]
     for lab, c in zip(labels, costs):
         if c is None:
             lines.append(f"  {lab}: no SLURM logs")

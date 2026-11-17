@@ -21,7 +21,7 @@
 
 set -o pipefail
 
-PLOT=1      # 1: also plot_bubbles.py on every run
+PLOT=0      # 1: also plot_bubbles.py on every run
 FORCE=0     # 1: redo the runs already analysed
 SURROGATE=$HOME/mmm/sciantix-official/utilities/HBFF/mmm_surrogate.py
 PYTHON=python3

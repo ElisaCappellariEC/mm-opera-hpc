@@ -40,7 +40,7 @@ RADIUS_TOL = 2e-6                                 # um: radius of a pore against
 SOLVED = "bubbles_and_stresses_selected.txt"      # output of MMM
 
 # %% ------------------------------------------------------------------------------------------------------------------
-# Functions (used more than once, or by other scripts)
+# Functions
 
 def read_run(path):
     """Radius, porosity, pressure and confinement (MPa) of every class of a run file of pore_distribution.py."""
