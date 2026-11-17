@@ -1,33 +1,31 @@
 #!/bin/bash
 # Runs test-polybubble on every case of a tree of cubes not solved yet (workstation, whole mesh).
 #
-#   bash run_mmm.sh CUBES [RESULTS]
+#   bash run_mmm.sh CUBES
 #
 # CUBES    tree of cubes written by Mérope and meshed by gmsh (e.g. ~/mmm/Merope/mmm_files/<folder>)
-# RESULTS  where MMM runs and the results stay: default ~/mmm/results/<name of CUBES>. NOT in the build tree
-#          (until 10/11/2026 the results were in build/polydispersebubble: deleting the build deleted them).
-#          The new or newer files of CUBES are copied there; the cases already solved are left as they are.
-#          RESULTS = CUBES solves the cubes where they are.
+# MMM runs and the results stay in ~/mmm/results/<name of CUBES>, NOT in the build tree (until 10/11/2026 the results
+# were in build/polydispersebubble: deleting the build deleted them). The new or newer files of CUBES are copied there;
+# the cases already solved are left as they are. A tree already in ~/mmm/results is solved where it is.
 # A case is a folder with one bubbles_<name>.txt of Mérope (bubbles_and_stresses_selected.txt of MMM apart). Its mesh is
 # its mesh_<name>.msh or, if it has mesh_case.txt (the cubes with the class pressures written by set_pressures.py), the
 # mesh of the folder named on the first line of that file, relative to the case.
 # Run the copy of the build folder (build/polydispersebubble): it looks for test-polybubble and src/libBehaviour.so
 # next to itself. Environment: source ~/mmm/env.sh in the same shell.
-# Settings: NPROC=8 POST=0 bash run_mmm.sh ...
 # author: E.Cappellari, POLIMI-CEA 2026
 
 set -o pipefail
 
-NPROC=${NPROC:-4}    # MPI processes (the memory does not depend on it: ~21 kB per Gmsh node in all)
-POST=${POST:-1}      # -p: 1 also writes the fields for ParaView
+NPROC=4                    # MPI processes (the memory does not depend on it: ~21 kB per Gmsh node in all)
+POST=1                     # -p: 1 also writes the fields for ParaView
 OPTIONS=(-sf 0 -dl 0.15)   # -dl = distMin / 2 of Mérope (0.3 um)
 
-if [[ $# -lt 1 || $# -gt 2 || ! -d "$1" ]]; then
-    echo "Usage: bash run_mmm.sh CUBES [RESULTS]   (CUBES: tree of cubes of Mérope; RESULTS: default ~/mmm/results/<name of CUBES>)"
+if [[ $# -ne 1 || ! -d "$1" ]]; then
+    echo "Usage: bash run_mmm.sh CUBES   (CUBES: tree of cubes of Mérope; results in ~/mmm/results/<name of CUBES>)"
     exit 1
 fi
 DIRECTORYMSH=$(cd "$1" && pwd)
-FOLDER=${2:-$HOME/mmm/results/$(basename "$DIRECTORYMSH")}
+FOLDER=$HOME/mmm/results/$(basename "$DIRECTORYMSH")
 mkdir -p "$FOLDER" || exit 1
 FOLDER=$(cd "$FOLDER" && pwd)
 
@@ -108,19 +106,12 @@ for DIR in "${CASES[@]}"; do
     file="${MSH[0]}"
     echo "Bubbles $BUBBLES, mesh $file"
 
-    echo "Starting mpirun..."
-    # folders ending in _refinement<k>: k uniform refinements in MMM (1 if k is missing)
-    EXTRA_ARGS=()
-    if [[ "$(basename "$DIR")" =~ _refinement([0-9]*)$ ]]; then
-        EXTRA_ARGS=(-r "${BASH_REMATCH[1]:-1}")
-        echo "Refinement enabled for $DIR: ${EXTRA_ARGS[*]}"
-    fi
-
     # the run is done in a temporary folder of the case: the outputs (created empty at the start) are moved into the
     # case folder only when test-polybubble ends without error
+    echo "Starting mpirun..."
     WORK="$DIR/mmm_tmp"
     rm -rf "$WORK" && mkdir -p "$WORK" || exit 1
-    ( cd "$WORK" && mpirun -n "$NPROC" "$EXE" -l "$LIBRARY" -m "$file" -f "$BUBBLES" -p "$POST" "${OPTIONS[@]}" "${EXTRA_ARGS[@]}" )
+    ( cd "$WORK" && mpirun -n "$NPROC" "$EXE" -l "$LIBRARY" -m "$file" -f "$BUBBLES" -p "$POST" "${OPTIONS[@]}" )
     STATUS=$?
     if [[ $STATUS -ne 0 ]]; then
         echo "ERROR: mpirun failed with status $STATUS for $file (run folder kept: $WORK)"

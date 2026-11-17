@@ -1,34 +1,30 @@
 #!/bin/bash
 # Analysis of the runs of a Latin hypercube solved by MMM: break_order.py on every run folder, then the tables of
-# s_hat for SCIANTIX (mmm_surrogate.py) on the unit runs.
+# s_hat for SCIANTIX and their surrogates over the runs (mmm_surrogate.py).
 #
-#   bash analyse_lhs.sh [LHS]
+#   bash analyse_lhs.sh LHS
 #
 # LHS  tree of the hypercube, with the results of MMM in its cubes:
 #          LHS/unit/run_<id>/side<L>_seed<NN>/   bubbles_unit_<id>.txt, summary_unit_<id>.txt (Mérope),
 #                                                bubbles_and_stresses_selected.txt, sig_hydro.txt (MMM)
 #          LHS/pk/run_<id>/side<L>_seed<NN>/     the same with the class pressures, and mesh_case.txt (set_pressures.py)
-#      default: the only lhs_* folder of the build folder (build/polydispersebubble), next to this script or, if the
-#      script is run from scripts/, in BUILD_DIR (default ~/mmm/build/polydispersebubble).
 # Per run folder (unit first, then pk; a pk run needs the unit run of the same cube, solved):
 #     break_order.py     pores.csv, break_order.txt/png; the output of the script goes to break_order.log
-#     plot_bubbles.py    only with PLOT=1: rve_size.txt, rve_fgr.txt/png (plot_bubbles.log). Its exit 1 also means
+#     plot_bubbles.py    if PLOT=1: rve_size.txt, rve_fgr.txt/png (plot_bubbles.log). Its exit 1 also means
 #                        "not an RVE" or "mesh not fine", which says little with one cube per run: read the log
 # A run with no cube solved is skipped; a run already analysed (pores.csv newer than the results of MMM) is skipped
 # unless FORCE=1.
-# Then, on the unit runs with pores.csv: mmm_surrogate.py (SURROGATE, default
-# ~/mmm/sciantix-official/utilities/HBFF/mmm_surrogate.py; skipped if the file is not there), which writes
-# mmm_outputs/shat_<id>.txt/png next to itself.
-# Settings: PLOT=1 FORCE=1 bash analyse_lhs.sh ...
+# Then, on the runs with pores.csv: mmm_surrogate.py (SURROGATE; skipped if the file is not there), which writes next
+# to itself mmm_outputs/shat_<id>.txt/png (unit) and shat_pk_<id>.txt/png (pk), and with --fit the surrogates over the
+# runs, mmm_outputs/surrogate_unit.txt/png and surrogate_pk.txt/png.
 # author: E.Cappellari, POLIMI-CEA 2026
 
 set -o pipefail
 
-PLOT=${PLOT:-0}      # 1: also plot_bubbles.py on every run
-FORCE=${FORCE:-0}    # 1: redo the runs already analysed
-BUILD_DIR=${BUILD_DIR:-$HOME/mmm/build/polydispersebubble}
-SURROGATE=${SURROGATE:-$HOME/mmm/sciantix-official/utilities/HBFF/mmm_surrogate.py}
-PYTHON=${PYTHON:-python3}
+PLOT=1      # 1: also plot_bubbles.py on every run
+FORCE=0     # 1: redo the runs already analysed
+SURROGATE=$HOME/mmm/sciantix-official/utilities/HBFF/mmm_surrogate.py
+PYTHON=python3
 STRESSES="bubbles_and_stresses_selected.txt"
 
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -38,30 +34,11 @@ for f in break_order.py plot_bubbles.py; do
         exit 1
     fi
 done
-
-if [[ $# -gt 1 ]]; then
-    echo "Usage: bash analyse_lhs.sh [LHS]   (LHS: tree of the hypercube; default: the lhs_* folder of the build folder)"
+if [[ $# -ne 1 || ! -d "$1" ]]; then
+    echo "Usage: bash analyse_lhs.sh LHS   (LHS: tree of the hypercube, with unit/ and pk/)"
     exit 1
 fi
-if [[ $# -eq 1 ]]; then
-    LHS=$1
-else
-    for where in "$HERE" "$BUILD_DIR"; do
-        mapfile -t FOUND < <(find "$where" -maxdepth 1 -type d -name "lhs_*" 2>/dev/null | sort)
-        [[ ${#FOUND[@]} -gt 0 ]] && break
-    done
-    if [[ ${#FOUND[@]} -ne 1 ]]; then
-        echo "ERROR: ${#FOUND[@]} lhs_* folders in $HERE and $BUILD_DIR (one expected): give the folder, bash analyse_lhs.sh LHS"
-        [[ ${#FOUND[@]} -gt 0 ]] && printf '    %s\n' "${FOUND[@]}"
-        exit 1
-    fi
-    LHS=${FOUND[0]}
-fi
-if [[ ! -d "$LHS" ]]; then
-    echo "ERROR: $LHS is not a folder"
-    exit 1
-fi
-LHS=$(cd "$LHS" && pwd)
+LHS=$(cd "$1" && pwd)
 
 # the run folders: unit first, then the others (pk)
 mapfile -t UNIT < <(find "$LHS" -type d -name "run_*" -path "*/unit/*" | sort)
@@ -132,21 +109,31 @@ if [[ ${#FAILED[@]} -gt 0 ]]; then
     printf '    FAILED: %s\n' "${FAILED[@]}"
 fi
 
-# Tables of s_hat per class for SCIANTIX: the unit runs only (mmm_surrogate.py is written for one pressure)
+# Tables of s_hat per class for SCIANTIX, one per run and load (shat_<id>.txt for unit, shat_pk_<id>.txt for pk: the
+# script tells the load from the pressures of pores.csv), then the surrogates over the runs (--fit)
 READY=()
-for RUN in "${UNIT[@]}"; do
+for RUN in "${RUNS[@]}"; do
     [[ -s "$RUN/pores.csv" ]] && READY+=("$RUN")
 done
 if [[ ${#READY[@]} -eq 0 ]]; then
-    echo "No unit run with pores.csv: mmm_surrogate.py not run."
+    echo "No run with pores.csv: mmm_surrogate.py not run."
 elif [[ ! -f "$SURROGATE" ]]; then
-    echo "mmm_surrogate.py not found ($SURROGATE): set SURROGATE=<path> to write the tables of s_hat."
+    echo "mmm_surrogate.py not found ($SURROGATE): set SURROGATE at the top of analyse_lhs.sh to write the tables of s_hat."
 else
-    echo "mmm_surrogate.py on ${#READY[@]} unit runs (log: $LHS/mmm_surrogate.log)"
+    echo "mmm_surrogate.py on ${#READY[@]} runs (log: $LHS/mmm_surrogate.log)"
     "$PYTHON" "$SURROGATE" "${READY[@]}" > "$LHS/mmm_surrogate.log" 2>&1
     STATUS=$?
     if [[ $STATUS -eq 0 ]]; then
-        grep "^wrote" "$LHS/mmm_surrogate.log" | sed 's/^/    /'
+        echo "    $(grep -c "^wrote" "$LHS/mmm_surrogate.log") tables written in $(dirname "$SURROGATE")/mmm_outputs"
+        echo "mmm_surrogate.py --fit: surrogates of the unit and pk runs (log: $LHS/mmm_surrogate_fit.log)"
+        "$PYTHON" "$SURROGATE" --fit > "$LHS/mmm_surrogate_fit.log" 2>&1
+        STATUS=$?
+        if [[ $STATUS -eq 0 ]]; then
+            grep "^wrote" "$LHS/mmm_surrogate_fit.log" | sed 's/^/    /'
+        else
+            echo "    mmm_surrogate.py --fit: exit $STATUS ($(tail -n 1 "$LHS/mmm_surrogate_fit.log")), see $LHS/mmm_surrogate_fit.log"
+            FAILED+=("mmm_surrogate.py --fit")
+        fi
     else
         echo "    mmm_surrogate.py: exit $STATUS ($(tail -n 1 "$LHS/mmm_surrogate.log")), see $LHS/mmm_surrogate.log"
         FAILED+=("mmm_surrogate.py")

@@ -83,11 +83,12 @@ count is nearly independent of the size:
 | side-30 cube, graded 0.3 µm (1867 pores) | 8.8 M | 31 |
 | side-30 cube, graded 0.212 µm | 22.7 M | 51 |
 | side-30 cubes, graded 0.15 µm, 10 seeds | 56.9–57.1 M | 27–54 (eight cubes 27–36; one 54) |
+| side-30 cube, graded 0.106 µm | 149.6 M | 31 |
 
 Final relative residual of the PCG ≈ 9e-11, Newton residual after the solve ≈ 3.5e-10. In mfem-mgis master BoomerAMG
 on a vector field is set up in its "systems" variant (the three displacement components are treated as a system),
 which is what makes it effective for elasticity. A direct solver (MUMPS) does not fit in memory at these sizes.
-Time of the linear solve on 512 processes for 57 M unknowns: ≈ 40–50 s.
+Time of the linear solve on 512 processes for 57 M unknowns: ≈ 40–50 s; for 150 M unknowns (0.106 µm): ≈ 60 s.
 
 "the non linear solver did not converge" = the PCG did not reach 1e-10 within `-li` iterations. Look at the mesh
 first; then `-v 1` (prints `PCG Iterations`) and a larger `-li`.
@@ -281,7 +282,7 @@ Described with their inputs and outputs in the report (section 2). In one line e
 
 | script | role |
 |---|---|
-| `run_mmm.sh CUBES [RESULTS]` | workstation: copies a tree of cubes to the results folder and solves the unsolved cases (`-sf 0 -dl 0.15`, `_refinement<k>` folders with `-r k`) |
+| `run_mmm.sh CUBES` | workstation: copies a tree of cubes to `~/mmm/results/<name>` and solves the unsolved cases (`-sf 0 -dl 0.15`; `NPROC`, `POST` at its top) |
 | (cluster) | one batch job per case for `partition-mesh`, then one for `test-polybubble -pm 1`; the batch script depends on the machine and is not in the repository |
 | `set_pressures.py` | cubes at unit pressure → the same cubes with the pressure of the class of each pore (same mesh: `mesh_case.txt`) |
 | `plot_bubbles.py` | ŝ per pore; mesh test, size of the RVE (Kanit 2003), released fraction of every cube |
@@ -301,7 +302,8 @@ A case is a folder with one `bubbles_<name>.txt` (the output `bubbles_and_stress
 - Perfect spheres, not meshed; no surface tension (the capillary term is in the SCIANTIX criterion, not here).
 - **No cascade**: the pressure of a broken pore is not removed and the stress is not redistributed.
 - The quantity is a **maximum over Gauss points**. It sits ≈ 0.04 h from the wall, so it converges slowly with the
-  mesh (observed order 0.7–1.4 between 0.3 and 0.15 µm) and decreases with refinement; it has noise per pore
+  mesh (observed order 1.0–1.9 on the large classes between 0.212 and 0.106 µm; the 0.15 µm mesh is within 1.15 % of
+  the 0.106 µm one, ≈ 2–3.5 % above the limit h → 0) and decreases with refinement; it has noise per pore
   (≈ 1 % median, 4 % at the 95th percentile between two meshes of the same size). Use class statistics, not single pores.
 - The search sphere is not periodic (pores cut by a face are searched on one side only) and can touch a neighbour
   if δ is too large (section 4).
