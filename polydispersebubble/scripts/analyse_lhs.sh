@@ -1,6 +1,6 @@
 #!/bin/bash
-# Analysis of the runs of a Latin hypercube solved by MMM: break_order.py on every run folder, then the tables of
-# s_hat for SCIANTIX and their surrogates over the runs (mmm_surrogate.py).
+# Analysis of the runs of a Latin hypercube solved by MMM: break_order.py on every run folder, then the surrogates of
+# s_hat over the runs for SCIANTIX (mmm_surrogate.py --fit).
 #
 #   bash analyse_lhs.sh LHS
 #
@@ -14,9 +14,9 @@
 #                        "not an RVE" or "mesh not fine", which says little with one cube per run: read the log
 # A run with no cube solved is skipped; a run already analysed (pores.csv newer than the results of MMM) is skipped
 # unless FORCE=1.
-# Then, on the runs with pores.csv: mmm_surrogate.py (SURROGATE; skipped if the file is not there), which writes next
-# to itself mmm_outputs/shat_<id>.txt/png (unit) and shat_pk_<id>.txt/png (pk), and with --fit the surrogates over the
-# runs, mmm_outputs/surrogate_unit.txt/png and surrogate_pk.txt/png.
+# Then mmm_surrogate.py --fit (SURROGATE; skipped if the file is not there) on the pores.csv of the runs and of NFIR_RUN
+# (the reference run, kept as the test of the surrogates; left out if it has no pores.csv): it writes next to itself
+# mmm_outputs/surrogate_unit.txt/png, surrogate_pk.txt/png and surrogate_<load>_sciantix.txt (input_hbs_shat.txt).
 # author: E.Cappellari, POLIMI-CEA 2026
 
 set -o pipefail
@@ -24,6 +24,7 @@ set -o pipefail
 PLOT=0      # 1: also plot_bubbles.py on every run
 FORCE=0     # 1: redo the runs already analysed
 SURROGATE=$HOME/mmm/sciantix-official/utilities/HBFF/mmm_surrogate.py
+NFIR_RUN=$HOME/mmm/results/test_rve_side30_mesh0.15_graded_rfine0.45_delta0.15/run_NFIR
 PYTHON=python3
 STRESSES="bubbles_and_stresses_selected.txt"
 
@@ -109,8 +110,8 @@ if [[ ${#FAILED[@]} -gt 0 ]]; then
     printf '    FAILED: %s\n' "${FAILED[@]}"
 fi
 
-# Tables of s_hat per class for SCIANTIX, one per run and load (shat_<id>.txt for unit, shat_pk_<id>.txt for pk: the
-# script tells the load from the pressures of pores.csv), then the surrogates over the runs (--fit)
+# Surrogates of s_hat over the runs (--fit reads pores.csv of every run folder below LHS and of NFIR_RUN; the script
+# tells the load of a run from the pressures of its pores.csv)
 READY=()
 for RUN in "${RUNS[@]}"; do
     [[ -s "$RUN/pores.csv" ]] && READY+=("$RUN")
@@ -118,25 +119,18 @@ done
 if [[ ${#READY[@]} -eq 0 ]]; then
     echo "No run with pores.csv: mmm_surrogate.py not run."
 elif [[ ! -f "$SURROGATE" ]]; then
-    echo "mmm_surrogate.py not found ($SURROGATE): set SURROGATE at the top of analyse_lhs.sh to write the tables of s_hat."
+    echo "mmm_surrogate.py not found ($SURROGATE): set SURROGATE at the top of analyse_lhs.sh to fit the surrogates."
 else
-    echo "mmm_surrogate.py on ${#READY[@]} runs (log: $LHS/mmm_surrogate.log)"
-    "$PYTHON" "$SURROGATE" "${READY[@]}" > "$LHS/mmm_surrogate.log" 2>&1
+    FOLDERS=("$LHS")
+    [[ -s "$NFIR_RUN/pores.csv" ]] && FOLDERS+=("$NFIR_RUN")
+    echo "mmm_surrogate.py --fit on ${#READY[@]} runs and $((${#FOLDERS[@]} - 1)) reference run (log: $LHS/mmm_surrogate_fit.log)"
+    "$PYTHON" "$SURROGATE" --fit "${FOLDERS[@]}" > "$LHS/mmm_surrogate_fit.log" 2>&1
     STATUS=$?
     if [[ $STATUS -eq 0 ]]; then
-        echo "    $(grep -c "^wrote" "$LHS/mmm_surrogate.log") tables written in $(dirname "$SURROGATE")/mmm_outputs"
-        echo "mmm_surrogate.py --fit: surrogates of the unit and pk runs (log: $LHS/mmm_surrogate_fit.log)"
-        "$PYTHON" "$SURROGATE" --fit > "$LHS/mmm_surrogate_fit.log" 2>&1
-        STATUS=$?
-        if [[ $STATUS -eq 0 ]]; then
-            grep "^wrote" "$LHS/mmm_surrogate_fit.log" | sed 's/^/    /'
-        else
-            echo "    mmm_surrogate.py --fit: exit $STATUS ($(tail -n 1 "$LHS/mmm_surrogate_fit.log")), see $LHS/mmm_surrogate_fit.log"
-            FAILED+=("mmm_surrogate.py --fit")
-        fi
+        grep "^wrote" "$LHS/mmm_surrogate_fit.log" | sed 's/^/    /'
     else
-        echo "    mmm_surrogate.py: exit $STATUS ($(tail -n 1 "$LHS/mmm_surrogate.log")), see $LHS/mmm_surrogate.log"
-        FAILED+=("mmm_surrogate.py")
+        echo "    mmm_surrogate.py --fit: exit $STATUS ($(tail -n 1 "$LHS/mmm_surrogate_fit.log")), see $LHS/mmm_surrogate_fit.log"
+        FAILED+=("mmm_surrogate.py --fit")
     fi
 fi
 
