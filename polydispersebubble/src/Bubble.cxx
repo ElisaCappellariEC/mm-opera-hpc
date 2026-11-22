@@ -206,6 +206,13 @@ struct TestParameters : PhysicalParameters {
   const char* linear_solver_preconditioner = "HypreBoomerAMG";
   // Maximum number of iterations of the linear solver (hypre default: 1000)
   int linear_solver_maximum_iterations = 5000;
+
+  /*
+   * Macroscopic hydrostatic strain: eps_xx = eps_yy = eps_zz = eps_hydro. 
+   *  - zero macroscopic strain: 0 = default;
+   *  - zero macroscopic stress: eps_hydro = -Sigma / (3 K_eff) with Sigma the macroscopic hydrostatic stress of the same case at zero strain (matrix and pores) and K_eff = (1 - h) K_m from the run at one pressure of the same cube.
+   */
+  mfem_mgis::real hydrostatic_strain = 0;
 };
 
 /**
@@ -253,6 +260,9 @@ void fill_parameters(mfem::OptionsParser& args, TestParameters& p) {
                  "--linear-solver-iterations",
                  "Maximum number of iterations of the linear solver, "
                  "default = 5000");
+  args.AddOption(&p.hydrostatic_strain, "-eh", "--hydrostatic-strain",
+                 "Macroscopic hydrostatic strain imposed on the cube "
+                 "(eps_xx = eps_yy = eps_zz, no shear), default = 0");
 
   args.Parse();
 
@@ -478,8 +488,9 @@ int main(int argc, char** argv) {
 
   print_mesh_information(problem.getImplementation<true>());
 
-  // Set macroscopic strain to zero
+  // Macroscopic strain: hydrostatic, eps_hydro on the diagonal (0 by default)
   std::vector<mfem_mgis::real> e(6, mfem_mgis::real{0});
+  e[0] = e[1] = e[2] = p.hydrostatic_strain;
   problem.setMacroscopicGradientsEvolution(
       [e](const mfem_mgis::real) { return e; });
   // Apply pressure boundary conditions on each bubble: one boundary
