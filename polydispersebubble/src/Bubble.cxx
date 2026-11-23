@@ -213,6 +213,14 @@ struct TestParameters : PhysicalParameters {
    *  - zero macroscopic stress: eps_hydro = -Sigma / (3 K_eff) with Sigma the macroscopic hydrostatic stress of the same case at zero strain (matrix and pores) and K_eff = (1 - h) K_m from the run at one pressure of the same cube.
    */
   mfem_mgis::real hydrostatic_strain = 0;
+
+  /*
+   * State of the matrix for its elastic constants, NEA/NSC/R(2024)1 Eqs. 7.1 and 7.4:
+   */
+  mfem_mgis::real temperature = 903.15;  ///< T (K), from NFIR case
+  mfem_mgis::real porosity = 0;          ///< p, porosity volume fraction (/)
+  mfem_mgis::real plutonium = 0;         ///< Pu, Pu/(Pu+U) weight fraction (/)
+  mfem_mgis::real stoichiometry = 0;     ///< x = 2.00 - O/M (/)
 };
 
 /**
@@ -548,17 +556,37 @@ int main(int argc, char** argv) {
   // imposing only the two elastic moduli. Please note that since
   // we are scaling everything to µm, we consider the Elastic
   // modulus in N/µm² to have a consistent displacement field.
-  // [TBC]
+  // Young modulus (GPa) and Poisson ratio of (U,Pu)O2, NEA/NSC/R(2024)1
+  // Eqs. 7.1 and 7.4, with T in K and porosity, Pu fraction,
+  // x = 2.00 - O/M in /
+  const auto T = p.temperature;
+  const auto x = p.stoichiometry;
+  const auto young_GPa =
+      (217.99 * (1 - p.plutonium) + 249.54 * p.plutonium) *
+      (1 - p.porosity) * (1 - p.porosity) / (1 + 1.124330 * p.porosity) *
+      (1.0 - 2.72739 * x + 13.84392 * x * x) *
+      (1.012527 - 2.282e-5 * T - 6.312e-8 * T * T);
+  const auto poisson =
+      (0.32051 * (1 - p.plutonium) + 0.31882 * p.plutonium) *
+      (1 - 1.03223 * p.porosity) *
+      (1.0 + 0.69962 * x - 7.52905 * x * x) *
+      (1.017906 - 6.420e-5 * T + 1.506e-8 * T * T);
+  if (mfem_mgis::isMPIMainProcessForDefaultCommunicator()) {
+    std::cout << "Young modulus E = " << young_GPa
+              << " GPa, Poisson ratio nu = " << poisson << " (T = " << T
+              << " K, porosity = " << p.porosity << ", Pu = " << p.plutonium
+              << ", x = " << x << ")" << std::endl;
+  }
   for (auto& s : {&m.s0, &m.s1}) {
     mgis::behaviour::setMaterialProperty(ctx, *s, "YoungModulus",
-                                         150e-3) |
-        or_die;  // Young's modulus
+                                         young_GPa * 1e-3) |
+        or_die;  // Young's modulus (1 GPa = 1e-3 N/µm²)
     mgis::behaviour::setMaterialProperty(ctx, *s, "PoissonRatio",
-                                         0.3) |
+                                         poisson) |
         or_die;  // Poisson's ratio
     mgis::behaviour::setExternalStateVariable(ctx, *s, "Temperature",
-                                              293.15) |
-        or_die;  // Room temperature
+                                              p.temperature) |
+        or_die;  // (K), not used by Elasticity.mfront
   }
   // Configure post-processing output
   if (post_processing) {
