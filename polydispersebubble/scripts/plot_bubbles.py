@@ -23,7 +23,7 @@ Stress factor of a pore, p its pressure, p_ref = sum(V p) / sum(V) the volume me
 A cube without s_hat (no sig_hydro.txt, or a pk cube whose unit run is not solved) is left out.
 A pore breaks when s_hat p > sigma_R. All the pressures scale with the load x = p_ref / sigma_R: a pore breaks at
 x_c = p_ref / (s_hat p), 1 / s_hat at one pressure; FGR = volume of the broken pores / volume of all the pores, a
-function of x only.
+function of x only. sigma_R is fitted as in D5.2: least squares of the mean FGR of the cubes against the FGR of the NFIR anneal against the bubble pressure (D5.2 Fig. 6 right). Biot: s_hat = 1/2 + 3/2 xi / (1 - xi) p_ref / p, the isolated pore in the mean tension of the matrix at zero macroscopic stress (xi p_ref / (1 - xi) by equilibrium, whatever h: h is the stress at zero strain that s_hat already removes), exact for the hollow sphere (D5.2 footnote 2: 1/2 + xi).
 
 Questions, with Kanit et al., Int. J. Solids Struct. 40 (2003) 3647 (variance D^2 between cubes ~ V^-alpha, alpha = 1 for
 independent pores; one cube is an RVE if 2 D / mean <= EPS_R):
@@ -59,8 +59,11 @@ FGR_LEVELS = (0.01, 0.015, 0.02, 0.05, 0.10, 0.20, 0.40, 0.80, 0.95)  # levels o
 VERDICT_LEVELS = (0.05, 0.95)                      # levels of FGR in the verdict (10-90 % until 11/11/2026); the
                                                    # levels below are the tail of the first pores, shown but left out
 MIN_VOLUME_SHARE = 0.05  # classes with less of the pore volume stay out of the verdict
-SIGMA_R_MPA = 275.0      # MPa, sigma_R of D5.2: only for the pressure axis of rve_fgr.png
+D52_SIGMA_R = 275.0      # MPa, sigma_R of D5.2 (monodisperse cubes): quoted next to the one fitted here
 D52_SIDE = 30.0          # um, side of the RVE of D5.2
+# NFIR anneal of D5.2 Fig. 6 right (digitised): bubble pressure (MPa, their Xe EoS at the measured gas density, 868-1185 C) and cumulative Kr-85 release (%)
+D52_P_MPA = np.array([182.88, 192.10, 198.72, 205.09, 210.69, 216.32, 223.83, 229.43, 235.83, 240.06, 245.50])
+D52_FGR = np.array([0.000, 0.329, 0.696, 1.353, 2.427, 3.771, 5.646, 7.589, 11.823, 16.754, 22.854])
 
 STRESSES, HYDRO = "bubbles_and_stresses_selected.txt", "sig_hydro.txt"
 MESH_CASE = "mesh_case.txt"  # in a pk cube of set_pressures.py: the folder of its unit run (same pores and mesh)
@@ -304,19 +307,33 @@ def x_levels(cube):
     return np.array([xc[order][min(np.searchsorted(released, lv - 1e-12), len(xc) - 1)] for lv in FGR_LEVELS])
 
 
-def draw_fgr(ax, cubes, x, legend=True):
-    """FGR curves of every cube (thin) and their mean with the band +/- 2 D of one cube, in %."""
+def draw_fgr(ax, cubes, x, legend=True, scale=1.0):
+    """FGR curves of every cube (thin) and their mean with the band +/- 2 D of one cube, in %, against scale * x."""
     cubes = sorted(cubes, key=lambda c: c["seed"])
     curves = np.array([fgr_curve(c, x) for c in cubes])
     for j, (c, f) in enumerate(zip(cubes, curves)):
-        ax.plot(x, 100 * f, lw=0.9, color=plt.get_cmap("tab10")(j % 10), alpha=0.85,
+        ax.plot(scale * x, 100 * f, lw=0.9, color=plt.get_cmap("tab10")(j % 10), alpha=0.85,
                 label=f"seed {c['seed']:02d}" if legend else None)
     mean = curves.mean(axis=0)
     if len(curves) > 1:
         D = curves.std(axis=0, ddof=1)
-        ax.fill_between(x, 100 * np.clip(mean - 2 * D, 0, 1), 100 * np.clip(mean + 2 * D, 0, 1), color="black",
+        ax.fill_between(scale * x, 100 * np.clip(mean - 2 * D, 0, 1), 100 * np.clip(mean + 2 * D, 0, 1), color="black",
                         alpha=0.10, lw=0, label=r"mean $\pm\,2D$ (spread of one cube)" if legend else None)
-    ax.plot(x, 100 * mean, color="black", lw=2.2, label=f"mean of {len(cubes)} cubes" if legend else None)
+    ax.plot(scale * x, 100 * mean, color="black", lw=2.2, label=f"mean of {len(cubes)} cubes" if legend else None)
+
+
+def fit_sigma_r(cubes):
+    """sigma_R (MPa) as in D5.2: least squares of the mean FGR of the cubes at x = p / sigma_R against the FGR of the NFIR
+    anneal (D52_P_MPA, D52_FGR), on a grid of 0.1 MPa; and its rms distance (points of FGR)."""
+    parts = [critical_pressures(c) for c in cubes]
+    xc = np.concatenate([x for x, _ in parts])
+    w = np.concatenate([V / V.sum() / len(cubes) for _, V in parts])
+    order = np.argsort(xc)
+    xc, released = xc[order], np.concatenate([[0.0], 100.0 * np.cumsum(w[order])])  # mean FGR (%) below every x_c
+    finite = xc[np.isfinite(xc)]
+    trial = np.arange(D52_P_MPA.min() / finite.max(), D52_P_MPA.max() / finite.min(), 0.1)
+    rms = np.array([np.sqrt(np.mean((released[np.searchsorted(xc, D52_P_MPA / s)] - D52_FGR) ** 2)) for s in trial])
+    return trial[rms.argmin()], rms.min()
 
 
 def smallest_rve_level(stats, side, key):
@@ -572,15 +589,36 @@ def main():
     print("\n== 3. FGR of every cube ==")
     xl = np.array([x_levels(c) for c in cubes])  # per cube, x_c at every level
     fgr = {lv: kanit(xl[:, k], L) for k, lv in enumerate(FGR_LEVELS)}
+    sigma_r, rms = fit_sigma_r(cubes)
+    one = np.array([fit_sigma_r([c])[0] for c in cubes])  # sigma_R fitted on one cube
+    pk = any(c["load"] != "unit" for c in cubes)
+    xc = np.concatenate([critical_pressures(c)[0] for c in cubes])
+    xc = xc[np.isfinite(xc)]
+    # per cube, x_c of every pore with Biot: s_hat p / p_ref = p / (2 p_ref) + 3/2 xi / (1 - xi)
+    biot = [1.0 / (0.5 * c["p"] / c["p_ref"] + 1.5 * c["xi"] / (1.0 - c["xi"])) for c in cubes]
+    xi = np.mean([c["xi"] for c in cubes])
+    xb = np.concatenate(biot)
     lines = [f"# 3. FGR of every cube, as OperaHPC D5.2 Fig. 7 (s_hat; python3 plot_bubbles.py {root})",
              "# - a pore breaks when s_hat p > sigma_R; FGR(p) = volume of the broken pores / volume of all the pores",
              "# - x_c = p_ref / sigma_R at which the FGR of a cube reaches the level (mean over the cubes +/- 2 D / sqrt(n)); "
              "p_ref = sum(V p) / sum(V), the pressure of every pore when they all have the same",
-             f"# - p_MPa = mean_x_c x {SIGMA_R_MPA:g} MPa, the sigma_R of D5.2 (monodisperse pores: to recalibrate)",
+             "# - sigma_R as in D5.2: least squares of the mean FGR of the cubes at x = p / sigma_R against the 11 points of "
+             "the NFIR anneal (D5.2 Fig. 6 right: bubble pressure of D5.2, Kr-85 release compared directly); "
+             "p_MPa = mean_x_c x sigma_R",
              f"# - eps_cube = 2 D / mean: error of x_c, i.e. of a sigma_R calibrated on the release, from one cube",
              f"# - cubes = (eps_cube / {100 * EPS_R:g} %)^2 cubes of this side; RVE_um = side x cubes^(1/3) (alpha = 1), "
              "with its 95 % interval",
+             "# - first and last pore to break over all the cubes, and Biot (s_hat = 1/2 + 3/2 xi / (1 - xi) p_ref / p: the "
+             "isolated pore in the mean tension of the matrix at zero stress, exact for the hollow sphere; D5.2 footnote 2: "
+             "1/2 + xi): their x_c; at one pressure s_hat = 1 / x_c, over 1/2 of the isolated pore",
              "#", f"# side {L:g} um, {n} cubes",
+             f"# sigma_R = {sigma_r:.1f} MPa, rms {rms:.2f} points of FGR (D5.2, monodisperse cubes: {D52_SIGMA_R:g} MPa); "
+             f"one cube: {one.min():.1f}-{one.max():.1f} MPa"
+             + (f", 2 D = {2 * one.std(ddof=1):.1f} MPa ({200 * one.std(ddof=1) / one.mean():.1f} %)" if n > 1 else ""),
+             f"# x_c: first pore {xc.min():.3f}, last pore {xc.max():.3f}, Biot "
+             + (f"{xb.min():.3f}-{xb.max():.3f}" if pk else
+                f"{xb.mean():.3f} (xi = {xi:.4f}; D5.2's 1/2 + xi: {1 / (0.5 + xi):.3f}); over the isolated pore (2 / x_c): first "
+                f"{2 / xc.min():.2f}, last {2 / xc.max():.2f}, Biot {2 / xb.mean():.2f} (D5.2: about 3 and 1.2)"),
              f"#  {'FGR_%':>5s}{'mean_x_c':>10s}{'+/-':>8s}{'D':>10s}{'eps_cube_%':>11s}{'cubes':>7s}{'RVE_um':>8s}"
              f"{'[95 %]':>10s}{'p_MPa':>8s}"]
     for level, r in fgr.items():
@@ -590,7 +628,7 @@ def main():
             continue
         lines.append(f"   {100 * level:5.3g}{r['mean']:10.4f}{r['half']:8.4f}{np.sqrt(r['D2']):10.2e}"
                      f"{100 * r['eps']:11.2f}{r['cubes']:7.1f}{r['rve']:8.1f}{r['interval']:>10s}"
-                     f"{SIGMA_R_MPA * r['mean']:8.1f}{note}")
+                     f"{sigma_r * r['mean']:8.1f}{note}")
     lines.append(f"# smallest level of FGR from which one cube of {L:g} um is an RVE: "
                  f"{smallest_rve_level(fgr, L, 'rve')} (best estimate), "
                  f"{smallest_rve_level(fgr, L, 'rve_high')} (upper bound of the 95 % interval of the RVE side); "
@@ -598,48 +636,57 @@ def main():
     with open(os.path.join(root, "rve_fgr.txt"), "w") as f:
         f.write("\n".join(lines) + "\n")
 
-    # figure: the curves of D5.2 Fig. 7 with a zoom on the onset (left), the error of one cube per level (right)
-    xc = np.concatenate([critical_pressures(c)[0] for c in cubes])
-    xc = xc[np.isfinite(xc)]
-    x = np.linspace(0.97 * xc.min(), 1.02 * xc.max(), 800)
-    fig, ax = plt.subplots(1, 2, figsize=(15.0, 5.6), gridspec_kw={"width_ratios": [1.6, 1.0]})
-    draw_fgr(ax[0], cubes, x)
-    pk = any(c["load"] != "unit" for c in cubes)
-    ax[0].set(xlim=(x[0], x[-1]), ylim=(0.0, 100.0),
-              xlabel=(r"$p_{ref} / \sigma_R$ (volume mean of the pore pressures / rupture stress)" if pk
-                      else r"$p / \sigma_R$ (pore pressure / rupture stress)"),
-              ylabel="FGR (% of the pore volume)", title="FGR of every cube")
-    top = ax[0].secondary_xaxis("top", functions=(lambda v: v * SIGMA_R_MPA, lambda v: v / SIGMA_R_MPA))
-    top.set_xlabel(rf"{'p_ref' if pk else 'pore pressure'} (MPa) for $\sigma_R$ = {SIGMA_R_MPA:g} MPa (value of D5.2, to "
-                   "recalibrate)")
-    ax[0].grid(True, color=GRID)
+    # figure: FGR against the pressure at the fitted sigma_R with the NFIR anneal and a zoom on the onset (left, as D5.2
+    # Fig. 7), the same against x = p / sigma_R with Biot (middle), the error of one cube per level (right)
+    x = np.linspace(0.97 * xc.min(), 1.03 * max(xc.max(), xb.max()), 1000)
+    fgr_biot = np.mean([(b[None, :] < x[:, None]) @ c["V"] / c["V"].sum() for c, b in zip(cubes, biot)], axis=0)
+    fig, ax = plt.subplots(1, 3, figsize=(21.0, 5.8), gridspec_kw={"width_ratios": [1.4, 1.4, 1.0]})
+    for a, scale in ((ax[0], sigma_r), (ax[1], 1.0)):
+        draw_fgr(a, cubes, x, legend=a is ax[0], scale=scale)
+        a.plot(scale * x, 100 * fgr_biot, "--", color=REFERENCE_LINE, lw=1.6,
+               label=rf"Biot, {S_HAT} = 1/2 + 3/2 $\xi / (1 - \xi)$" + (r" $p_{ref} / p$" if pk else ""))
+        a.plot(D52_P_MPA * scale / sigma_r, D52_FGR, "*-", color=D52_COLOR, ms=9, lw=1.2, label="NFIR anneal (D5.2 Fig. 6)")
+        a.set(xlim=(scale * x[0], scale * x[-1]), ylim=(0.0, 100.0), ylabel="FGR (% of the pore volume)")
+        a.grid(True, color=GRID)
+    ax[0].set(xlabel=f"{'volume mean of the pore pressures' if pk else 'bubble pressure'} (MPa)",
+              title=rf"FGR against the pressure, $\sigma_R$ = {sigma_r:.0f} MPa fitted on the NFIR anneal")
     ax[0].legend(loc="upper left", frameon=False, fontsize=9, ncol=2)
-    zoom = ax[0].inset_axes([0.60, 0.08, 0.37, 0.40])
+    ax[1].set(xlabel=(r"$p_{ref} / \sigma_R$ (volume mean of the pore pressures / rupture stress)" if pk
+                      else r"$p / \sigma_R$ (pore pressure / rupture stress)"),
+              title=r"FGR against the load $x$, and Biot")
+    ax[1].legend(loc="upper left", frameon=False, fontsize=9)
+    if not pk:
+        ax[1].text(0.92, 0.04, f"{S_HAT} over the isolated pore (1/2):\nfirst pore {2 / xc.min():.1f}, last "
+                   f"{2 / xc.max():.2f}, Biot {2 / xb.mean():.2f}\nD5.2: about 3 and 1.2", transform=ax[1].transAxes,
+                   ha="right", va="bottom", fontsize=9, color=REFERENCE_LINE)
+    zoom = ax[0].inset_axes([0.45, 0.08, 0.36, 0.40])
     first = np.mean([fgr_curve(c, x) for c in cubes], axis=0)
-    draw_fgr(zoom, cubes, x, legend=False)
-    zoom.set(xlim=(x[0], x[min(np.searchsorted(first, 0.30), len(x) - 1)]), ylim=(0.0, 30.0), title="zoom on the onset")
+    draw_fgr(zoom, cubes, x, legend=False, scale=sigma_r)
+    zoom.plot(D52_P_MPA, D52_FGR, "*-", color=D52_COLOR, ms=7, lw=1.0)
+    zoom.set(xlim=(sigma_r * x[0], sigma_r * x[min(np.searchsorted(first, 0.30), len(x) - 1)]), ylim=(0.0, 30.0),
+             title="zoom on the onset")
     zoom.title.set_fontsize(9)
     zoom.tick_params(labelsize=9)
     zoom.grid(True, color=GRID)
 
-    ax[1].axhspan(0.0, 100 * EPS_R, color=GRID, alpha=0.8, lw=0, label=f"one cube is an RVE ({100 * EPS_R:g}%)")
+    ax[2].axhspan(0.0, 100 * EPS_R, color=GRID, alpha=0.8, lw=0, label=f"one cube is an RVE ({100 * EPS_R:g}%)")
     levels = [lv for lv in FGR_LEVELS if np.isfinite(fgr[lv]["eps"])]
     eps = np.array([100 * fgr[lv]["eps"] for lv in levels])
-    ax[1].plot([100 * lv for lv in levels], eps, "-", color=SEQ_BLUE[3], lw=1.2, label=f"side {L:g} um ({n} cubes)")
+    ax[2].plot([100 * lv for lv in levels], eps, "-", color=SEQ_BLUE[3], lw=1.2, label=f"side {L:g} um ({n} cubes)")
     for i_lv, (lv, e) in enumerate(zip(levels, eps)):
-        ax[1].plot(100 * lv, e, "o", ms=6, color=SEQ_BLUE[3], mfc=SEQ_BLUE[3] if lv in IN_VERDICT else "white")
+        ax[2].plot(100 * lv, e, "o", ms=6, color=SEQ_BLUE[3], mfc=SEQ_BLUE[3] if lv in IN_VERDICT else "white")
         up = i_lv % 2 == 0  # close levels: labels above and below in turn, so that they do not overlap
-        ax[1].annotate(f"{fgr[lv]['rve']:.0f} um", (100 * lv, e), xytext=(6 if up else -6, 7 if up else -7),
+        ax[2].annotate(f"{fgr[lv]['rve']:.0f} um", (100 * lv, e), xytext=(6 if up else -6, 7 if up else -7),
                        textcoords="offset points", ha="left" if up else "right", va="bottom" if up else "top",
                        fontsize=9, color=REFERENCE_LINE)
-    ax[1].set(xlabel="level of FGR (%), log scale", ylabel=r"error of one cube on $x_c$, $2D$ / mean (%)", ylim=(0.0, None),
+    ax[2].set(xlabel="level of FGR (%), log scale", ylabel=r"error of one cube on $x_c$, $2D$ / mean (%)", ylim=(0.0, None),
               xscale="log", title="Error of one cube; labels: side of the RVE")
-    ax[1].set_xticks([1, 2, 5, 10, 20, 40, 80, 95], ["1", "2", "5", "10", "20", "40", "80 ", " 95"])
-    ax[1].minorticks_off()
-    ax[1].plot([], [], "o", color=REFERENCE_LINE, mfc="white",
+    ax[2].set_xticks([1, 2, 5, 10, 20, 40, 80, 95], ["1", "2", "5", "10", "20", "40", "80 ", " 95"])
+    ax[2].minorticks_off()
+    ax[2].plot([], [], "o", color=REFERENCE_LINE, mfc="white",
                label=f"outside {100 * VERDICT_LEVELS[0]:g}-{100 * VERDICT_LEVELS[1]:g}%")
-    ax[1].grid(True, color=GRID)
-    ax[1].legend(frameon=False, fontsize=9)
+    ax[2].grid(True, color=GRID)
+    ax[2].legend(frameon=False, fontsize=9)
     fig.tight_layout()
     fig.savefig(os.path.join(root, "rve_fgr.png"), dpi=150)
     plt.close(fig)
