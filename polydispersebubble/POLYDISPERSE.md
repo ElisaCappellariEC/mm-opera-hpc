@@ -24,11 +24,21 @@ $$\boldsymbol\sigma\,\mathbf n=-p_i\,\mathbf n\ \text{on the wall of pore } i\ (
   zero macroscopic *stress* afterwards (section 5).
 - **One load per pore**: $p_i=$ `pref` × (6th column of the bubble file); `pref` is the option `-pr` (default 1) and
   the 6th column is 1 when missing. In `bubble/` one pressure is given to all the pores.
-- **Material**: `Elasticity.mfront` (MFront, generic interface → `src/libBehaviour.so`), Young modulus
-  $E$ = 150 GPa and Poisson ratio ν = 0.3 (UO₂), set in `src/Bubble.cxx`.
-- **Units**: lengths in µm; $E$ is written 150e-3 N/µm² so that displacements are consistent. With pressure loads
-  only and one material, **σ does not depend on $E$** and is linear in the pressures: pressures in MPa give stresses
-  in MPa, and with $p=1$ everywhere the output is σ_I/p. ν does matter.
+- **Material**: `Elasticity.mfront` (MFront, generic interface → `src/libBehaviour.so`). Young modulus and Poisson
+  ratio of (U,Pu)O₂ from NEA/NSC/R(2024)1, Eqs. 7.1 and 7.4, computed in `src/Bubble.cxx` and printed at every run:
+
+  $$E=\bigl[217.99(1-Pu)+249.54\,Pu\bigr]\frac{(1-p)^2}{1+1.124330\,p}\,(1-2.72739\,x+13.84392\,x^2)\,
+  (1.012527-2.282\times10^{-5}\,T-6.312\times10^{-8}\,T^2)\ \text{GPa}$$
+
+  $$\nu=\bigl[0.32051(1-Pu)+0.31882\,Pu\bigr](1-1.03223\,p)\,(1+0.69962\,x-7.52905\,x^2)\,
+  (1.017906-6.420\times10^{-5}\,T+1.506\times10^{-8}\,T^2)$$
+
+  with $T$ in K, $p$ the porosity, $Pu$ the weight fraction Pu/(Pu+U) and $x=2.00-$O/M. The four values are constants of `TestParameters`: **T = 903.15 K** (the NFIR disc, `run_NFIR.txt`), Pu = 0, x = 0 and **p = 0**.
+  Before 23/11 E = 150 GPa and ν = 0.3: all the runs solved until then are at ν = 0.3.
+- **Units**: lengths in µm; $E$ is written in N/µm² (1 GPa = 10⁻³ N/µm²) so that displacements are consistent. With
+  pressure loads only and one material, **σ does not depend on $E$** and is linear in the pressures: pressures in MPa
+  give stresses in MPa, and with $p=1$ everywhere the output is σ_I/p. **ν does matter**: ν = 0.3116 instead of 0.3
+  changes ŝ. The strain of `-eh` does depend on $E$ and ν: `scripts/stress_free_strain.py` must use the same values (`YOUNG`, `POISSON`).
 - The problem is linear: one Newton iteration, one linear solve. `broken` exists in the code (a broken pore would
   get zero pressure) but is never set: there is no cascade.
 
