@@ -177,6 +177,8 @@ def read_cube(folder):
     if hydro is None or not {"Volume", "Average"} <= set(hydro):
         print(f"{folder}: no {HYDRO}, no s_hat: left out")
         return None
+    # RVE vs matrix mean: Volume and Average of sig_hydro.txt are over the matrix only, so 1 - Volume / L^3 is the
+    # porosity and h adds the pores (-p_ref on their walls): h p_ref = -Sigma, not -Average
     xi = 1.0 - hydro["Volume"][0] / side**3
     xi_pores = np.sum(4.0 / 3.0 * np.pi * radii**3) / side**3
     if abs(xi - xi_pores) > 0.01:
@@ -393,7 +395,7 @@ def main():
     if not cubes:
         return 0
     if len({c["side"] for c in cubes}) > 1:
-        raise SystemExit(f"{root}: cubes of several sides ({', '.join(sorted({f'{c['side']:g}' for c in cubes}))}): "
+        raise SystemExit(f"{root}: cubes of several sides ({', '.join(sorted({format(c['side'], 'g') for c in cubes}))}): "
                          "one side per folder")
 
     # %% 1. Is the mesh fine enough? side<L>_seed01 on the meshes of gmsh of the mesh test -------------------------------

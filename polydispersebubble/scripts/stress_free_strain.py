@@ -58,7 +58,7 @@ def main():
             continue
 
         # %% the strain of zero macroscopic stress --------------------------------------------------------------------
-        sigma_1 = -pk["h"] * pk["p_ref"]
+        sigma_1 = -pk["h"] * pk["p_ref"]  # RVE vs matrix mean: Sigma of matrix and pores, not the Average of sig_hydro.txt
         k_eff = (1.0 - unit["h"]) * K_MATRIX
         eps = -sigma_1 / (3.0 * k_eff)
         with open(os.path.join(folder, OUTPUT), "w") as f:

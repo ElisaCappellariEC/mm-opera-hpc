@@ -349,6 +349,12 @@ void write_bubble_infos(std::ofstream& file_to_write,
  * Integrates the hydrostatic pressure field over all elements and
  * computes the volume-averaged value using MPI reduction if needed
  *
+ * RVE vs matrix mean: only the elements of material m are integrated and the
+ * integral is divided by their volume. The pores are holes of the mesh, so
+ * "Volume" is the matrix volume ((1 - xi) L^3) and "Average" is <sigma_h>_m,
+ * not the macroscopic stress of the RVE, -p_hyd = (1 - xi) <sigma_h>_m - xi p
+ * (README).
+ *
  * \tparam parallel Whether running in parallel mode
  * \param os Output stream for results
  * \param prob The nonlinear evolution problem
@@ -504,6 +510,8 @@ int main(int argc, char** argv) {
   // Apply pressure boundary conditions on each bubble: one boundary
   // condition per bubble, on the mesh boundary whose tag is the bubble
   // identifier ("Physical Surface" in the .geo file).
+  // RVE vs matrix mean: the pressure of the pores is only this boundary
+  // traction, so it does not enter sig_hydro.txt (the -xi p of the RVE mean).
   for (const auto& b : bubbles) {
     problem.addBoundaryCondition(
         ctx, mfem_mgis::make_unique<
@@ -815,7 +823,8 @@ int main(int argc, char** argv) {
       write_message(outfile_sighydr, "Volume", "Integral", "Average");
 
     // Hydrostatic stress tr(sigma)/3 at the integration points, then its
-    // average over the RVE  
+    // average over the matrix (RVE vs matrix mean: not over the RVE, see
+    // calculateAverageHydrostaticStress)
     mfem_mgis::computeHydrostaticPressure(
         ctx, hyp, m, mfem_mgis::Material::END_OF_TIME_STEP) |
         or_die;
