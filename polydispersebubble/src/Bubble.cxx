@@ -210,7 +210,7 @@ struct TestParameters : PhysicalParameters {
   /*
    * Macroscopic hydrostatic strain: eps_xx = eps_yy = eps_zz = eps_hydro. 
    *  - zero macroscopic strain: 0 = default;
-   *  - zero macroscopic stress: eps_hydro = -Sigma / (3 K_eff) with Sigma the macroscopic hydrostatic stress of the same case at zero strain (matrix and pores) and K_eff = (1 - h) K_m from the run at one pressure of the same cube.
+   *  - zero stress (D5.2, zero mean of the matrix): eps_hydro = p_m p_ref / (3 (1 - p_m_1) K_m) with p_m p_ref = -<sigma_h> (sig_hydro.txt) of the same case at zero strain and p_m_1 the same from the run at one pressure of the same cube (scripts/stress_free_strain.py).
    */
   mfem_mgis::real hydrostatic_strain = 0;
 
@@ -349,11 +349,10 @@ void write_bubble_infos(std::ofstream& file_to_write,
  * Integrates the hydrostatic pressure field over all elements and
  * computes the volume-averaged value using MPI reduction if needed
  *
- * RVE vs matrix mean: only the elements of material m are integrated and the
- * integral is divided by their volume. The pores are holes of the mesh, so
- * "Volume" is the matrix volume ((1 - xi) L^3) and "Average" is <sigma_h>_m,
- * not the macroscopic stress of the RVE, -p_hyd = (1 - xi) <sigma_h>_m - xi p
- * (README).
+ * Only the elements of material m are integrated and the integral is divided
+ * by their volume: the pores are holes of the mesh (boundary conditions), so
+ * "Volume" is the matrix volume ((1 - xi) L^3) and "Average" the mean of the
+ * matrix, -p_hyd (README).
  *
  * \tparam parallel Whether running in parallel mode
  * \param os Output stream for results
@@ -510,8 +509,6 @@ int main(int argc, char** argv) {
   // Apply pressure boundary conditions on each bubble: one boundary
   // condition per bubble, on the mesh boundary whose tag is the bubble
   // identifier ("Physical Surface" in the .geo file).
-  // RVE vs matrix mean: the pressure of the pores is only this boundary
-  // traction, so it does not enter sig_hydro.txt (the -xi p of the RVE mean).
   for (const auto& b : bubbles) {
     problem.addBoundaryCondition(
         ctx, mfem_mgis::make_unique<
@@ -823,8 +820,7 @@ int main(int argc, char** argv) {
       write_message(outfile_sighydr, "Volume", "Integral", "Average");
 
     // Hydrostatic stress tr(sigma)/3 at the integration points, then its
-    // average over the matrix (RVE vs matrix mean: not over the RVE, see
-    // calculateAverageHydrostaticStress)
+    // average over the matrix (see calculateAverageHydrostaticStress)
     mfem_mgis::computeHydrostaticPressure(
         ctx, hyp, m, mfem_mgis::Material::END_OF_TIME_STEP) |
         or_die;

@@ -44,7 +44,7 @@ $$
 p_{hyd} = -\dfrac{1}{3} tr\left(\dfrac{1}{V}\int_V \overline{\overline{\sigma}} dV\right)
 $$
 
- where $V$ is the volume of the RVE and $\overline{\overline{\sigma}}$ the Cauchy stress field. The corresponding internal stress field induced by an internal pressure equal to ($p_{in}-p_{hyd}$) in porosities and a stress-free periodic boundary condition can be derived from the elastic superposition principle given by the equation 
+ where $V$ is the volume of the matrix (the porosities are boundary conditions: $-p_{hyd}$ is the `Average` of `sig_hydro.txt`) and $\overline{\overline{\sigma}}$ the Cauchy stress field. The corresponding internal stress field induced by an internal pressure equal to ($p_{in}-p_{hyd}$) in porosities and a stress-free periodic boundary condition can be derived from the elastic superposition principle given by the equation 
 
 $$
 \overline{\overline{σ}}\left(p_{in}-p_{hyd}, 0\right) = \overline{\overline{σ}}\left(p_{in},p_{hyd}\right)+ p_{hyd} \overline{\overline{I}}  

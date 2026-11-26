@@ -2,7 +2,7 @@
 Which pores break first in the cubes of a run of MMM.
 
 Folders of ROOT as for plot_bubbles.py: the size cubes side<L>_seed<NN> (the mesh variants are left out). Per pore:
-    s_hat, x_c = p_ref / (s_hat p) stress factor at zero macroscopic stress (plot_bubbles.py) and the load x = p_ref /
+    s_hat, x_c = p_ref / (s_hat p) stress factor at zero stress (plot_bubbles.py) and the load x = p_ref /
                                    sigma_R at which the pore breaks (1 / s_hat at one pressure; p_ref = sum(V p) / sum(V)):
                                    the pores break in the order of x_c, FGR = volume of the broken pores / volume of all
     neighbourhood                  gap (wall to wall, periodic cube) and radius of the first and second nearest pores;
@@ -264,14 +264,14 @@ def main():
     print("\n".join(lines))
 
     # %% pores.csv: one row per pore and cube ------------------------------------------------------------------------------
-    names = ["cube", "seed", "side_um", "pore_id", "class", "R_um", "xi", "h", "sigma", "s_hat", "x_c", "gap1_um",
+    names = ["cube", "seed", "side_um", "pore_id", "class", "R_um", "xi", "p_m", "sigma", "s_hat", "x_c", "gap1_um",
              "R_nn1_um", "gap2_um", "R_nn2_um", "close", "F", "max_wall_um", "max_cos_nn", "max_other_wall_um",
              "break_rank", "fgr_at_break", "p_MPa", "p_ref_MPa", "s_hat_1", "max_shift_um"]
     pores = os.path.join(root, "pores.csv")
     with open(pores, "w") as out:
         out.write(f"# pores of {root} (python3 break_order.py), load {load}: "
-                  + ("s_hat = (sigma + h) / (1 - h), x_c = 1 / s_hat" if load == "unit" else
-                     "s_hat = sigma + h p_ref (1 + s_hat_1) / p, s_hat_1 of the unit run of the same cube, "
+                  + ("s_hat = (sigma + p_m) / (1 - p_m), x_c = 1 / s_hat" if load == "unit" else
+                     "s_hat = sigma + p_m p_ref (1 + s_hat_1) / p, s_hat_1 of the unit run of the same cube, "
                      "x_c = p_ref / (s_hat p)")
                   + "; p_ref = sum(V p) / sum(V); max_shift = distance between the points of the maxima of the run and "
                   "of its unit run (pk cubes); "
@@ -284,7 +284,7 @@ def main():
             shift = c["max_shift"] if c["max_shift"] is not None else np.full(len(c["R"]), np.nan)
             for j in range(len(c["R"])):
                 row = [c["folder"], c["seed"], f"{c['side']:g}", c["id"][j], k[j], f"{c['R'][j]:.6f}", f"{c['xi']:.6f}",
-                       f"{c['h']:.6f}", f"{c['sigma'][j]:.6f}", f"{c['s_hat'][j]:.6f}", f"{c['xc'][j]:.6f}",
+                       f"{c['p_m']:.6f}", f"{c['sigma'][j]:.6f}", f"{c['s_hat'][j]:.6f}", f"{c['xc'][j]:.6f}",
                        f"{c['gap1'][j]:.4f}", f"{c['R_nn1'][j]:.6f}", f"{c['gap2'][j]:.4f}", f"{c['R_nn2'][j]:.6f}",
                        c["close"][j], f"{c['F'][j]:.5f}", f"{c['max_wall'][j]:.4f}", f"{c['max_cos'][j]:.4f}",
                        f"{c['max_other'][j]:.4f}", c["rank"][j], f"{c['fgr_at_break'][j]:.6f}", f"{c['p'][j]:.6g}",

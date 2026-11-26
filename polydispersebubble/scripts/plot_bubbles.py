@@ -8,22 +8,23 @@ bubbles_and_stresses_selected.txt and sig_hydro.txt (MMM):
 
 Stress factor of a pore, p its pressure, p_ref = sum(V p) / sum(V) the volume mean of the pressures of the cube:
     sigma = sigma_I_max / p          zero macroscopic strain (MMM)
-    s_hat = (sigma + h) / (1 - h)    zero macroscopic stress, same pressure in every pore (the unit runs): h p = xi p -
-                                     (1 - xi) <sigma_h> (D5.2), xi the porosity, <sigma_h> the mean hydrostatic stress of
-                                     the matrix (sig_hydro.txt)
-    s_hat = sigma + h p_ref (1 + s_hat_1) / p
-                                     zero macroscopic stress, pressure of its class in every pore (the pk cubes of
-                                     set_pressures.py, plan B): MMM gives the stress Sigma = -h p_ref = (1 - xi) <sigma_h> -
-                                     xi p_ref at zero strain; a stress -Sigma, with no pressure in the pores, adds
-                                     -Sigma (I + S_1) to the field, S_1 the field of the unit run of the same cube (its
-                                     folder in mesh_case.txt) at zero stress, whose largest principal stress at the pore is
-                                     s_hat_1. Exact when the pressures are equal (then s_hat = s_hat_1); otherwise it adds
-                                     the maxima of the two runs as if they were at the same point with the same direction
-                                     (the distance between the two points is printed)
+    s_hat = (sigma + p_m) / (1 - p_m)
+                                     zero stress (D5.2), same pressure in every pore (the unit runs): p_m p = -<sigma_h>,
+                                     <sigma_h> the mean hydrostatic stress of the matrix (sig_hydro.txt; the pores are
+                                     boundary conditions); a uniform p_m p brings it to zero
+    s_hat = sigma + p_m p_ref (1 + s_hat_1) / p
+                                     zero stress, pressure of its class in every pore (the pk cubes of set_pressures.py,
+                                     plan B): MMM gives <sigma_h> = -p_m p_ref at zero strain; the state with no pressure
+                                     in the pores and mean p_m p_ref of the matrix, p_m p_ref (I + S_1), brings it to zero,
+                                     S_1 the field of the unit run of the same cube (its folder in mesh_case.txt) at zero
+                                     stress, whose largest principal stress at the pore is s_hat_1. Exact when the
+                                     pressures are equal (then s_hat = s_hat_1); otherwise it adds the maxima of the two
+                                     runs as if they were at the same point with the same direction (the distance between
+                                     the two points is printed)
 A cube without s_hat (no sig_hydro.txt, or a pk cube whose unit run is not solved) is left out.
 A pore breaks when s_hat p > sigma_R. All the pressures scale with the load x = p_ref / sigma_R: a pore breaks at
 x_c = p_ref / (s_hat p), 1 / s_hat at one pressure; FGR = volume of the broken pores / volume of all the pores, a
-function of x only. sigma_R is fitted as in D5.2: least squares of the mean FGR of the cubes against the FGR of the NFIR anneal against the bubble pressure (D5.2 Fig. 6 right). Biot: s_hat = 1/2 + 3/2 xi / (1 - xi) p_ref / p, the isolated pore in the mean tension of the matrix at zero macroscopic stress (xi p_ref / (1 - xi) by equilibrium, whatever h: h is the stress at zero strain that s_hat already removes), exact for the hollow sphere (D5.2 footnote 2: 1/2 + xi).
+function of x only. sigma_R is fitted as in D5.2: least squares of the mean FGR of the cubes against the FGR of the NFIR anneal against the bubble pressure (D5.2 Fig. 6 right). Biot: s_hat = 1/2 + xi p_ref / p, the isolated pore plus a stress of about xi p_ref (D5.2 footnote 2).
 
 Questions, with Kanit et al., Int. J. Solids Struct. 40 (2003) 3647 (variance D^2 between cubes ~ V^-alpha, alpha = 1 for
 independent pores; one cube is an RVE if 2 D / mean <= EPS_R):
@@ -177,17 +178,16 @@ def read_cube(folder):
     if hydro is None or not {"Volume", "Average"} <= set(hydro):
         print(f"{folder}: no {HYDRO}, no s_hat: left out")
         return None
-    # RVE vs matrix mean: Volume and Average of sig_hydro.txt are over the matrix only, so 1 - Volume / L^3 is the
-    # porosity and h adds the pores (-p_ref on their walls): h p_ref = -Sigma, not -Average
+    # Volume and Average of sig_hydro.txt are over the matrix only: 1 - Volume / L^3 is the porosity
     xi = 1.0 - hydro["Volume"][0] / side**3
     xi_pores = np.sum(4.0 / 3.0 * np.pi * radii**3) / side**3
     if abs(xi - xi_pores) > 0.01:
         print(f"{folder}: porosity {xi:.4f} from the volume of {HYDRO}, {xi_pores:.4f} from the pores: wrong side or "
               "output of another run? s_hat of this cube is suspect")
-    h = xi - (1.0 - xi) * hydro["Average"][0] / p_ref  # -Sigma / p_ref, Sigma the macroscopic stress at zero strain
-    cube.update(xi=xi, h=h)
+    p_m = -hydro["Average"][0] / p_ref  # mean hydrostatic stress of the matrix at zero strain, over -p_ref
+    cube.update(xi=xi, p_m=p_m)
     if load == "unit":
-        cube["s_hat"] = (sigma + h) / (1.0 - h)
+        cube["s_hat"] = (sigma + p_m) / (1.0 - p_m)
         return cube
     if load == "mixed":
         print(f"{folder}: pores at different pressures and no {MESH_CASE} (the unit run of the same cube, "
@@ -218,7 +218,7 @@ def read_cube(folder):
               f"{100 * np.mean(shift[ok] > 0.5 * unit['R'][order][ok]):.1f} % of the pores beyond R / 2")
         cube["max_shift"] = shift
     s_hat_1 = unit["s_hat"][order]
-    cube.update(s_hat=sigma + h * p_ref * (1.0 + s_hat_1) / p, s_hat_1=s_hat_1)
+    cube.update(s_hat=sigma + p_m * p_ref * (1.0 + s_hat_1) / p, s_hat_1=s_hat_1)
     return cube
 
 
@@ -596,8 +596,8 @@ def main():
     pk = any(c["load"] != "unit" for c in cubes)
     xc = np.concatenate([critical_pressures(c)[0] for c in cubes])
     xc = xc[np.isfinite(xc)]
-    # per cube, x_c of every pore with Biot: s_hat p / p_ref = p / (2 p_ref) + 3/2 xi / (1 - xi)
-    biot = [1.0 / (0.5 * c["p"] / c["p_ref"] + 1.5 * c["xi"] / (1.0 - c["xi"])) for c in cubes]
+    # per cube, x_c of every pore with Biot: s_hat p / p_ref = p / (2 p_ref) + xi
+    biot = [1.0 / (0.5 * c["p"] / c["p_ref"] + c["xi"]) for c in cubes]
     xi = np.mean([c["xi"] for c in cubes])
     xb = np.concatenate(biot)
     lines = [f"# 3. FGR of every cube, as OperaHPC D5.2 Fig. 7 (s_hat; python3 plot_bubbles.py {root})",
@@ -610,16 +610,15 @@ def main():
              f"# - eps_cube = 2 D / mean: error of x_c, i.e. of a sigma_R calibrated on the release, from one cube",
              f"# - cubes = (eps_cube / {100 * EPS_R:g} %)^2 cubes of this side; RVE_um = side x cubes^(1/3) (alpha = 1), "
              "with its 95 % interval",
-             "# - first and last pore to break over all the cubes, and Biot (s_hat = 1/2 + 3/2 xi / (1 - xi) p_ref / p: the "
-             "isolated pore in the mean tension of the matrix at zero stress, exact for the hollow sphere; D5.2 footnote 2: "
-             "1/2 + xi): their x_c; at one pressure s_hat = 1 / x_c, over 1/2 of the isolated pore",
+             "# - first and last pore to break over all the cubes, and Biot (s_hat = 1/2 + xi p_ref / p, D5.2 footnote 2): "
+             "their x_c; at one pressure s_hat = 1 / x_c, over 1/2 of the isolated pore",
              "#", f"# side {L:g} um, {n} cubes",
              f"# sigma_R = {sigma_r:.1f} MPa, rms {rms:.2f} points of FGR (D5.2, monodisperse cubes: {D52_SIGMA_R:g} MPa); "
              f"one cube: {one.min():.1f}-{one.max():.1f} MPa"
              + (f", 2 D = {2 * one.std(ddof=1):.1f} MPa ({200 * one.std(ddof=1) / one.mean():.1f} %)" if n > 1 else ""),
              f"# x_c: first pore {xc.min():.3f}, last pore {xc.max():.3f}, Biot "
              + (f"{xb.min():.3f}-{xb.max():.3f}" if pk else
-                f"{xb.mean():.3f} (xi = {xi:.4f}; D5.2's 1/2 + xi: {1 / (0.5 + xi):.3f}); over the isolated pore (2 / x_c): first "
+                f"{xb.mean():.3f} (xi = {xi:.4f}); over the isolated pore (2 / x_c): first "
                 f"{2 / xc.min():.2f}, last {2 / xc.max():.2f}, Biot {2 / xb.mean():.2f} (D5.2: about 3 and 1.2)"),
              f"#  {'FGR_%':>5s}{'mean_x_c':>10s}{'+/-':>8s}{'D':>10s}{'eps_cube_%':>11s}{'cubes':>7s}{'RVE_um':>8s}"
              f"{'[95 %]':>10s}{'p_MPa':>8s}"]
@@ -646,7 +645,7 @@ def main():
     for a, scale in ((ax[0], sigma_r), (ax[1], 1.0)):
         draw_fgr(a, cubes, x, legend=a is ax[0], scale=scale)
         a.plot(scale * x, 100 * fgr_biot, "--", color=REFERENCE_LINE, lw=1.6,
-               label=rf"Biot, {S_HAT} = 1/2 + 3/2 $\xi / (1 - \xi)$" + (r" $p_{ref} / p$" if pk else ""))
+               label=rf"Biot, {S_HAT} = 1/2 + $\xi$" + (r" $p_{ref} / p$" if pk else ""))
         a.plot(D52_P_MPA * scale / sigma_r, D52_FGR, "*-", color=D52_COLOR, ms=9, lw=1.2, label="NFIR anneal (D5.2 Fig. 6)")
         a.set(xlim=(scale * x[0], scale * x[-1]), ylim=(0.0, 100.0), ylabel="FGR (% of the pore volume)")
         a.grid(True, color=GRID)

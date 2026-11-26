@@ -21,7 +21,7 @@ $$\boldsymbol\sigma\,\mathbf n=-p_i\,\mathbf n\ \text{on the wall of pore } i\ (
 - **Zero macroscopic strain** ($\bar{\boldsymbol\varepsilon}=0$, `setMacroscopicGradientsEvolution` with six zeros):
   the cube cannot expand, so the pressurised pores put the matrix in compression on average. The mean hydrostatic
   stress of the matrix, $\langle\sigma_h\rangle<0$, is an output (`sig_hydro.txt`) and is what brings the result to
-  zero macroscopic *stress* afterwards (section 5).
+  zero *stress* afterwards (section 5).
 - **One load per pore**: $p_i=$ `pref` × (6th column of the bubble file); `pref` is the option `-pr` (default 1) and
   the 6th column is 1 when missing. In `bubble/` one pressure is given to all the pores.
 - **Material**: `Elasticity.mfront` (MFront, generic interface → `src/libBehaviour.so`). Young modulus and Poisson
@@ -151,19 +151,20 @@ Done by `scripts/plot_bubbles.py` (and used by `break_order.py`), not by the sol
 
 With one pressure $p$ in all the pores, per unit pressure:
 
-$$\sigma_i=\frac{\sigma_{I,i}^{max}}{p},\qquad h=\xi-(1-\xi)\frac{\langle\sigma_h\rangle}{p},\qquad
-\hat s_i=\frac{\sigma_i+h}{1-h}$$
+$$\sigma_i=\frac{\sigma_{I,i}^{max}}{p},\qquad p_m=-\frac{\langle\sigma_h\rangle}{p},\qquad
+\hat s_i=\frac{\sigma_i+p_m}{1-p_m}$$
 
-ξ is the porosity of the cube. $-h\,p$ is the macroscopic stress of the constrained cube (pores at $-p$, matrix at
-$\langle\sigma_h\rangle$). Adding a uniform tension $h\,p$ to the whole cube brings it to zero macroscopic stress;
-this is the same as lowering the pore pressure to $p(1-h)$ and adding $h\,p$ to every stress, hence the formula (the
-rescaling of OperaHPC D5.2). Example: `side30_seed01` of the report, ξ = 0.1131, $\langle\sigma_h\rangle$ = −0.1576,
-$h$ = 0.2529.
+$-p_m\,p$ is the mean hydrostatic stress of the matrix of the constrained cube (`Average` of `sig_hydro.txt`; the pores
+are boundary conditions). Adding a uniform tension $p_m\,p$ brings it to zero; this is the same as lowering the pore
+pressure to $p(1-p_m)$ and adding $p_m\,p$ to every stress, hence the formula (the rescaling of OperaHPC D5.2).
+Example: `side30_seed01` of the report, ξ = 0.1131, $\langle\sigma_h\rangle$ = −0.1576, $p_m$ = 0.1576.
 
 With a pressure per class (`pk` cubes of `set_pressures.py`), $p_{ref}=\sum V_ip_i/\sum V_i$ and the correction needs
 the field of the *unit* run of the same cube, $\hat s_{1,i}$:
-$\hat s_i=\sigma_i+h\,p_{ref}(1+\hat s_{1,i})/p_i$. It is exact for equal pressures; otherwise it adds two maxima
-that may not be at the same point (the script prints their distance). Not yet used on a solved cube.
+$\hat s_i=\sigma_i+p_m\,p_{ref}(1+\hat s_{1,i})/p_i$. It is exact for equal pressures; otherwise it adds two maxima
+that may not be at the same point (the script prints their distance), so it is an upper bound: against the run with
+`-eh` of `scripts/stress_free_strain.py` (zero mean of the matrix with the class pressures), +0–2 % (median) and
++12 % at most on 4 cubes of 10 µm.
 
 A pore breaks when $\hat s_i\,p_i>\sigma_R$, i.e. at the load $x=p_{ref}/\sigma_R=p_{ref}/(\hat s_ip_i)$; the released
 fraction is the volume of the broken pores over the volume of all the pores.
